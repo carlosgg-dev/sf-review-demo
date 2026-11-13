@@ -1,0 +1,9 @@
+{
+  "path": ["src"],
+  "format": ["typescript"],
+  "ignore": ["**/*.test.ts"],
+  "minTokens": 50,
+  "threshold": 0,
+  "exitCode": 1,
+  "reporters": ["console"]
+}

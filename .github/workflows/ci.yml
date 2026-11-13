@@ -1,0 +1,37 @@
+# The job name "verify" is the status check required on the main branch.
+name: CI
+
+on:
+  pull_request:
+    branches: [main] # init: the main branch
+  push:
+    branches: [main] # init: the main branch
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0 # verify.sh compares against the main branch
+
+      - name: Environment
+        run: cp .env.example .env # synthetic values: CI holds no real secrets
+
+      # --- language setup and dependency installation (written by init) ---
+      - uses: pnpm/action-setup@v6 # version from packageManager in package.json
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+      # --- end language setup and dependency installation ---
+
+      - name: Verify
+        run: ./scripts/verify.sh

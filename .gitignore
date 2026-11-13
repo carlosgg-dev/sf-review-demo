@@ -1,0 +1,28 @@
+# Dependencies
+node_modules/
+
+# Local data
+data/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Test and tool output
+coverage/
+reports/
+.stryker-tmp/
+*.tsbuildinfo
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Claude Code
+.claude/settings.local.json
+
+# OS and editors
+.DS_Store
+.idea/
+.vscode/

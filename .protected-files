@@ -1,0 +1,22 @@
+# Files that define the rules of this project. A job branch cannot change them.
+# One path per line; a trailing / covers a folder. init adds each gate tool configuration file.
+.protected-files
+.github/
+scripts/verify.sh
+software-factory.yml
+ARCHITECTURE.md
+CLAUDE.md
+tsconfig.json
+cucumber.js
+vitest.config.ts
+coverage-thresholds.json
+scripts/check-coverage.js
+stryker.config.json
+eslint.config.js
+eslint.ignores.js
+eslint.complexity.config.js
+eslint.size.config.js
+.prettierrc.json
+.prettierignore
+.dependency-cruiser.cjs
+.jscpd.json

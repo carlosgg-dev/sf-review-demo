@@ -1,0 +1,6 @@
+# software-factory configuration of this project. Protected: only the owner changes it.
+
+language: en
+main_branch: main
+
+removed_gates: {}
