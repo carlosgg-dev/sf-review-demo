@@ -19,28 +19,33 @@
 
 ## A vehicle already inside
 
-4. Repeat step 2 with `{"plate":"test 001"}`.
+4. Wait at least one minute after step 2, then repeat step 2 with `{"plate":"test 001"}`.
    Expected: `409 Conflict` and the body `{"error":"vehicle_already_inside"}`.
+5. `sqlite3 data/qa-entries.db "SELECT plate, entered_at FROM parked_vehicles WHERE plate = 'TEST001'"`
+   Expected: one row, `TEST001|<UTC time of step 2>`, the `enteredAt` of step 2 converted to UTC,
+   for example `2026-11-13T08:15:00Z`; not the time of step 4.
 
 ## A plate that is not valid
 
-5. Repeat step 2 with `{"plate":"12#4"}`, then with `{"plate":"A"}` and with `{"plate":"ÑAB123"}`.
+6. Repeat step 2 with `{"plate":"12#4"}`, then with `{"plate":"A"}`, `{"plate":"ÑAB123"}`,
+   `{"plate":"1234\tABC"}` (tab), `{"plate":"1234\u00a0ABC"}` (non-breaking space) and
+   `{"plate":"1234\u2013ABC"}` (en dash), typed exactly so; the JSON escapes produce the characters.
    Expected: each one `400 Bad Request` and the body `{"error":"invalid_plate"}`.
 
 ## A request that is not well formed
 
-6. Repeat step 2 with the body `{"plate":"TEST003","enteredAt":"2026-01-01T00:00:00+01:00"}`.
+7. Repeat step 2 with the body `{"plate":"TEST003","enteredAt":"2026-01-01T00:00:00+01:00"}`.
    Expected: `400 Bad Request` and the body `{"error":"invalid_request"}`.
-7. Repeat step 2 with the body `{"plate":1234}`.
+8. Repeat step 2 with the body `{"plate":1234}`.
    Expected: `400 Bad Request` and the body `{"error":"invalid_request"}`.
-8. Repeat step 2 with the body `{"plate":` (malformed JSON).
+9. Repeat step 2 with the body `{"plate":` (malformed JSON).
    Expected: `400 Bad Request` and the body `{"error":"invalid_request"}`.
-9. Repeat step 2 replacing the header with `-H 'Content-Type: text/plain'`.
-   Expected: `400 Bad Request` (not `415`) and the body `{"error":"invalid_request"}`.
-10. Repeat step 2 with `{"plate":"TEST003"}`, then with `{"plate":"1234"}`.
-    Expected: `201 Created` both times, which shows that steps 6 to 8 recorded nothing.
+10. Repeat step 2 replacing the header with `-H 'Content-Type: text/plain'`.
+    Expected: `400 Bad Request` (not `415`) and the body `{"error":"invalid_request"}`.
+11. Repeat step 2 with `{"plate":"TEST003"}`, then with `{"plate":"1234"}`.
+    Expected: `201 Created` both times, which shows that steps 7 to 9 recorded nothing.
 
 ## The entry survives a restart
 
-11. Stop the server, start it again as in step 1 without deleting the database, and repeat step 2.
+12. Stop the server, start it again as in step 1 without deleting the database, and repeat step 2.
     Expected: `409 Conflict` and the body `{"error":"vehicle_already_inside"}`.

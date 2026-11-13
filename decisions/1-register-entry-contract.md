@@ -55,7 +55,8 @@ A plate is checked and normalised in this order:
    made only of spaces and hyphens, is `invalid_plate`.
 
 Examples: `1234-abc` and `1234 ABC` become `1234ABC`; `ABCDE-12345` becomes `ABCDE12345`;
-`1234\tABC` (with a tab), `1234ıbc`, `ÑAB123`, `A`, `1-` and `ABCDE123456` are `invalid_plate`.
+`1234\tABC` (with a tab), `1234\u00A0ABC` (with a non-breaking space), `1234\u2013ABC` (with an
+en dash), `1234ıbc`, `ÑAB123`, `A`, `1-` and `ABCDE123456` are `invalid_plate`.
 
 Reason: the architecture identifies vehicles by normalised plate; the format must accept foreign
 plates, so it does not enforce the Spanish pattern. 10 characters cover European plates. Checking
@@ -80,7 +81,8 @@ A SQLite table `parked_vehicles` holds the vehicles currently inside:
 | `plate`      | TEXT | PRIMARY KEY | normalised plate                                            |
 | `entered_at` | TEXT | NOT NULL    | entry instant in UTC, RFC 3339, e.g. `2026-11-13T08:15:00Z` |
 
-A registration of a plate already in the table fails and leaves the existing row unchanged. The
+A registration of a plate already in the table fails and leaves the existing row unchanged: the
+original `entered_at` is kept, never overwritten by the time of the rejected registration. The
 duplicate check relies on the primary key, not on a previous read, so two simultaneous entries of
 the same plate cannot both succeed. The table is created at start-up when it does not exist.
 

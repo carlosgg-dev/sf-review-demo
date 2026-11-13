@@ -2,6 +2,8 @@
 Feature: Register a vehicle entry
   The exit booth staff register each vehicle that enters the car park by its licence plate.
   The server records the entry time; the booth cannot set it.
+  In a plate written in these scenarios, \uXXXX stands for the single character with that Unicode
+  code point, for example \u00A0 for a non-breaking space.
 
   @issue-1
   Scenario Outline: A vehicle enters and the server records its entry time
@@ -31,10 +33,13 @@ Feature: Register a vehicle entry
       | longest plate after normalisation  | ABCDE-12345 | ABCDE12345     |
 
   @issue-1
-  Scenario: A vehicle already inside cannot enter again
-    Given the vehicle with plate "1234ABC" is already inside
+  Scenario: A vehicle already inside cannot enter again and keeps its entry time
+    Given the server clock reads "2026-11-13 09:15:00" in Europe/Madrid
+    And the booth has registered the entry of plate "1234ABC"
+    And the server clock reads "2026-11-13 10:40:00" in Europe/Madrid
     When the booth registers the entry of plate "1234 abc"
     Then the entry is rejected because the vehicle is already inside
+    And the vehicle with plate "1234ABC" is recorded as inside since "2026-11-13T09:15:00+01:00"
 
   @issue-1
   Scenario Outline: A plate that is not valid is rejected
@@ -43,14 +48,17 @@ Feature: Register a vehicle entry
     And no vehicle is inside
 
     Examples:
-      | case                                   | typed plate |
-      | forbidden character                    | 12#4        |
-      | empty                                  |             |
-      | one character                          | A           |
-      | one character after normalisation      | 1-          |
-      | eleven characters                      | ABCDE123456 |
-      | letter outside A-Z                     | ÑAB123      |
-      | lower case letter that is not ASCII    | 1234ıbc     |
+      | case                                   | typed plate   |
+      | forbidden character                    | 12#4          |
+      | empty                                  |               |
+      | one character                          | A             |
+      | one character after normalisation      | 1-            |
+      | eleven characters                      | ABCDE123456   |
+      | letter outside A-Z                     | ÑAB123        |
+      | lower case letter that is not ASCII    | 1234ıbc       |
+      | tab                                    | 1234\u0009ABC |
+      | non-breaking space                     | 1234\u00A0ABC |
+      | en dash                                | 1234\u2013ABC |
 
   @issue-1
   Scenario Outline: A request that is not well formed is rejected
