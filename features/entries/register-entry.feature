@@ -3,20 +3,32 @@ Feature: Register a vehicle entry
   The exit booth staff register each vehicle that enters the car park by its licence plate.
   The server records the entry time; the booth cannot set it.
 
-  Background:
-    Given the server clock reads "2026-11-13 09:15:00" in Europe/Madrid
-
   @issue-1
-  Scenario: A vehicle enters and the server records its entry time
+  Scenario Outline: A vehicle enters and the server records its entry time
+    Given the server clock reads "<clock>" in Europe/Madrid
     When the booth registers the entry of plate "1234ABC"
     Then the entry is accepted
-    And the response shows plate "1234ABC" entered at "2026-11-13T09:15:00+01:00"
+    And the response shows plate "1234ABC" entered at "<entered at>"
+
+    Examples:
+      | case                         | clock                   | entered at                |
+      | winter time                  | 2026-11-13 09:15:00     | 2026-11-13T09:15:00+01:00 |
+      | summer time                  | 2026-07-01 09:15:00     | 2026-07-01T09:15:00+02:00 |
+      | fraction of a second dropped | 2026-11-13 09:15:00.750 | 2026-11-13T09:15:00+01:00 |
 
   @issue-1
-  Scenario: The plate is recorded in its normalised form
-    When the booth registers the entry of plate "1234-abc"
+  Scenario Outline: The plate is recorded in its normalised form
+    Given the server clock reads "2026-11-13 09:15:00" in Europe/Madrid
+    When the booth registers the entry of plate "<typed plate>"
     Then the entry is accepted
-    And the response shows plate "1234ABC" entered at "2026-11-13T09:15:00+01:00"
+    And the response shows plate "<recorded plate>" entered at "2026-11-13T09:15:00+01:00"
+
+    Examples:
+      | case                               | typed plate | recorded plate |
+      | hyphen and lower case              | 1234-abc    | 1234ABC        |
+      | spaces                             | 1234 ABC    | 1234ABC        |
+      | shortest plate                     | ab          | AB             |
+      | longest plate after normalisation  | ABCDE-12345 | ABCDE12345     |
 
   @issue-1
   Scenario: A vehicle already inside cannot enter again
@@ -25,6 +37,33 @@ Feature: Register a vehicle entry
     Then the entry is rejected because the vehicle is already inside
 
   @issue-1
-  Scenario: A plate that is not valid is rejected
-    When the booth registers the entry of plate "12#4"
+  Scenario Outline: A plate that is not valid is rejected
+    When the booth registers the entry of plate "<typed plate>"
     Then the entry is rejected because the plate is not valid
+    And no vehicle is inside
+
+    Examples:
+      | case                                   | typed plate |
+      | forbidden character                    | 12#4        |
+      | empty                                  |             |
+      | one character                          | A           |
+      | one character after normalisation      | 1-          |
+      | eleven characters                      | ABCDE123456 |
+      | letter outside A-Z                     | ÑAB123      |
+      | lower case letter that is not ASCII    | 1234ıbc     |
+
+  @issue-1
+  Scenario Outline: A request that is not well formed is rejected
+    When the booth sends an entry request with content type "<content type>" and body '<body>'
+    Then the entry is rejected because the request is not valid
+    And no vehicle is inside
+
+    Examples:
+      | case                     | content type     | body                                                        |
+      | the booth sends a time   | application/json | {"plate":"TEST003","enteredAt":"2026-01-01T00:00:00+01:00"} |
+      | plate is a number        | application/json | {"plate":1234}                                              |
+      | plate is missing         | application/json | {}                                                          |
+      | body is not an object    | application/json | ["TEST003"]                                                 |
+      | malformed JSON           | application/json | {"plate":"TEST003"                                          |
+      | empty body               | application/json |                                                             |
+      | content type is not JSON | text/plain       | {"plate":"TEST003"}                                         |

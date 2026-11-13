@@ -24,12 +24,23 @@
 
 ## A plate that is not valid
 
-5. Repeat step 2 with `{"plate":"12#4"}`.
-   Expected: `400 Bad Request` and the body `{"error":"invalid_plate"}`.
+5. Repeat step 2 with `{"plate":"12#4"}`, then with `{"plate":"A"}` and with `{"plate":"ÑAB123"}`.
+   Expected: each one `400 Bad Request` and the body `{"error":"invalid_plate"}`.
+
+## A request that is not well formed
+
 6. Repeat step 2 with the body `{"plate":"TEST003","enteredAt":"2026-01-01T00:00:00+01:00"}`.
    Expected: `400 Bad Request` and the body `{"error":"invalid_request"}`.
+7. Repeat step 2 with the body `{"plate":1234}`.
+   Expected: `400 Bad Request` and the body `{"error":"invalid_request"}`.
+8. Repeat step 2 with the body `{"plate":` (malformed JSON).
+   Expected: `400 Bad Request` and the body `{"error":"invalid_request"}`.
+9. Repeat step 2 replacing the header with `-H 'Content-Type: text/plain'`.
+   Expected: `400 Bad Request` (not `415`) and the body `{"error":"invalid_request"}`.
+10. Repeat step 2 with `{"plate":"TEST003"}`, then with `{"plate":"1234"}`.
+    Expected: `201 Created` both times, which shows that steps 6 to 8 recorded nothing.
 
 ## The entry survives a restart
 
-7. Stop the server, start it again as in step 1 without deleting the database, and repeat step 2.
-   Expected: `409 Conflict` and the body `{"error":"vehicle_already_inside"}`.
+11. Stop the server, start it again as in step 1 without deleting the database, and repeat step 2.
+    Expected: `409 Conflict` and the body `{"error":"vehicle_already_inside"}`.
