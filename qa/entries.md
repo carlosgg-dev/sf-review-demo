@@ -1,0 +1,35 @@
+# QA: vehicle entries
+
+## Preparation
+
+1. Start the server on an empty database:
+   `DATABASE_PATH=data/qa-entries.db node --env-file-if-exists=.env src/main.ts` after deleting
+   `data/qa-entries.db` if it exists.
+   Expected: the console shows `Listening on http://127.0.0.1:3000`.
+
+## Register an entry
+
+2. `curl -i -X POST http://127.0.0.1:3000/entries -H 'Content-Type: application/json' -d '{"plate":"TEST001"}'`
+   Expected: `201 Created` and a body
+   `{"plate":"TEST001","enteredAt":"<now>"}`, where `<now>` is the current time in Madrid, to the
+   second, with its offset (`+01:00` in winter, `+02:00` in summer), for example
+   `2026-11-13T09:15:00+01:00`.
+3. `curl -i -X POST http://127.0.0.1:3000/entries -H 'Content-Type: application/json' -d '{"plate":"test-002"}'`
+   Expected: `201 Created` and `"plate":"TEST002"` in the body.
+
+## A vehicle already inside
+
+4. Repeat step 2 with `{"plate":"test 001"}`.
+   Expected: `409 Conflict` and the body `{"error":"vehicle_already_inside"}`.
+
+## A plate that is not valid
+
+5. Repeat step 2 with `{"plate":"12#4"}`.
+   Expected: `400 Bad Request` and the body `{"error":"invalid_plate"}`.
+6. Repeat step 2 with the body `{"plate":"TEST003","enteredAt":"2026-01-01T00:00:00+01:00"}`.
+   Expected: `400 Bad Request` and the body `{"error":"invalid_request"}`.
+
+## The entry survives a restart
+
+7. Stop the server, start it again as in step 1 without deleting the database, and repeat step 2.
+   Expected: `409 Conflict` and the body `{"error":"vehicle_already_inside"}`.
