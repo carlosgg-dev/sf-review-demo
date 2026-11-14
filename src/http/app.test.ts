@@ -462,10 +462,12 @@ describe("POST /exits", () => {
 
   it("fails with no internal details when the exit cannot be recorded", async () => {
     const failure = new Error("database is locked");
+    const inside = [parked("TEST007", "2026-11-13T08:00:00Z")];
 
-    const response = await post(appWith({ failure }), '{"plate":"TEST007"}');
+    const response = await post(appWith({ inside, failure }), '{"plate":"TEST007"}');
 
     expect(response.statusCode).toBe(500);
     expect(response.body).toBe('{"error":"internal_error"}');
+    expect(inside).toEqual([parked("TEST007", "2026-11-13T08:00:00Z")]);
   });
 });

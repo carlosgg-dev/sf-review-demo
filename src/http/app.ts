@@ -88,7 +88,7 @@ function addEntryRoute(app: FastifyInstance, registerEntry: RegisterEntry): void
 
 function addExitRoute(app: FastifyInstance, checkOut: CheckOut): void {
   app.post<{ Body: { plate: string } }>("/exits", { schema: { body: plateRequest } }, (request) => {
-    const exit = checkOut.checkOut(request.body.plate);
+    const exit = checkOut.leave(request.body.plate);
     return {
       plate: exit.plate,
       enteredAt: timestamp(exit.enteredAt),

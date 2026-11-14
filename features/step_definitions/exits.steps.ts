@@ -78,15 +78,15 @@ Given(
   "a vehicle entered at {string} in Europe\\/Madrid",
   function (this: ParkingWorld, clock: string) {
     this.now = madridClock(clock);
-    this.registerEntry?.register(PLATE);
+    this.registerEntry.register(PLATE);
   },
 );
 
 When("it leaves at {string} in Europe\\/Madrid", function (this: ParkingWorld, clock: string) {
   this.now = madridClock(clock);
-  this.exit = this.checkOut?.checkOut(PLATE);
+  this.exit = this.checkOut.leave(PLATE);
 });
 
 Then("the fee is {int} cents", function (this: ParkingWorld, fee: number) {
-  assert.equal(this.exit?.feeCents, fee);
+  assert.equal(this.exit.feeCents, fee);
 });

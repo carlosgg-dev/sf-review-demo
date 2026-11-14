@@ -18,23 +18,42 @@ export class ParkingWorld extends World {
   #database: Database | undefined;
   #lock: DatabaseSync | undefined;
   #app: FastifyInstance | undefined;
-  /** The use cases the app runs, for the fee rules checked below the interface. */
-  registerEntry: RegisterEntry | undefined;
-  checkOut: CheckOut | undefined;
-  exit: Exit | undefined;
+  #registerEntry: RegisterEntry | undefined;
+  #checkOut: CheckOut | undefined;
+  #exit: Exit | undefined;
 
   start(): void {
     this.#directory = mkdtempSync(join(tmpdir(), "parking-acceptance-"));
     this.#database = new Database(this.#databasePath());
     const clock = { now: () => this.now };
     const parkedVehicles = new SqliteParkedVehicles(this.#database.connection);
-    this.registerEntry = new RegisterEntry(clock, parkedVehicles);
-    this.checkOut = new CheckOut(clock, parkedVehicles);
+    this.#registerEntry = new RegisterEntry(clock, parkedVehicles);
+    this.#checkOut = new CheckOut(clock, parkedVehicles);
     this.#app = buildApp({
       database: this.#database,
-      registerEntry: this.registerEntry,
-      checkOut: this.checkOut,
+      registerEntry: this.#registerEntry,
+      checkOut: this.#checkOut,
     });
+  }
+
+  /** The use cases the app runs, for the fee rules checked below the interface. */
+  get registerEntry(): RegisterEntry {
+    return started(this.#registerEntry);
+  }
+
+  get checkOut(): CheckOut {
+    return started(this.#checkOut);
+  }
+
+  get exit(): Exit {
+    if (this.#exit === undefined) {
+      throw new Error("no vehicle has left");
+    }
+    return this.#exit;
+  }
+
+  set exit(exit: Exit) {
+    this.#exit = exit;
   }
 
   async stop(): Promise<void> {
@@ -81,10 +100,7 @@ export class ParkingWorld extends World {
   }
 
   async #send(request: InjectOptions): Promise<LightMyRequestResponse> {
-    if (this.#app === undefined) {
-      throw new Error("the app has not started");
-    }
-    this.response = await this.#app.inject(request);
+    this.response = await started(this.#app).inject(request);
     return this.response;
   }
 
@@ -99,6 +115,13 @@ export class ParkingWorld extends World {
   #databasePath(): string {
     return join(this.#directory, "parking.db");
   }
+}
+
+function started<T>(part: T | undefined): T {
+  if (part === undefined) {
+    throw new Error("the app has not started");
+  }
+  return part;
 }
 
 setWorldConstructor(ParkingWorld);

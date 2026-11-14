@@ -27,7 +27,7 @@ describe("CheckOut", () => {
       parked("1234ABC", "2026-11-13T08:00:00Z"),
     ]);
 
-    const exit = checkOut.checkOut("1234-abc");
+    const exit = checkOut.leave("1234-abc");
 
     expect(exit.plate).toBe("1234ABC");
     expect(exit.enteredAt.toString()).toBe("2026-11-13T09:00:00+01:00[Europe/Madrid]");
@@ -41,7 +41,7 @@ describe("CheckOut", () => {
       parked("1234ABC", "2026-11-13T08:00:00Z"),
     ]);
 
-    const exit = checkOut.checkOut("1234ABC");
+    const exit = checkOut.leave("1234ABC");
 
     expect(exit.exitedAt.toString()).toBe("2026-11-13T10:30:00+01:00[Europe/Madrid]");
     expect(exit.feeCents).toBe(250);
@@ -51,13 +51,13 @@ describe("CheckOut", () => {
     const first = parked("1234ABC", "2026-11-13T08:00:00Z");
     const { checkOut, inside } = checkOutAt("2026-11-13T09:00:00Z", [first]);
 
-    expect(() => checkOut.checkOut("12#4")).toThrow(InvalidPlate);
+    expect(() => checkOut.leave("12#4")).toThrow(InvalidPlate);
     expect(inside).toEqual([first]);
   });
 
   it("rejects a vehicle that is not inside", () => {
     const { checkOut } = checkOutAt("2026-11-13T09:00:00Z");
 
-    expect(() => checkOut.checkOut("1234ABC")).toThrow(VehicleNotInside);
+    expect(() => checkOut.leave("1234ABC")).toThrow(VehicleNotInside);
   });
 });

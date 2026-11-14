@@ -32,7 +32,7 @@ export class CheckOut {
   }
 
   /** Throws InvalidPlate or VehicleNotInside. */
-  checkOut(typedPlate: string): Exit {
+  leave(typedPlate: string): Exit {
     const plate = normalisePlate(typedPlate);
     const exitedAt = currentSecond(this.#clock);
     const { enteredAt } = this.#vehicles.remove(plate);
