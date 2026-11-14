@@ -5,7 +5,11 @@
 `POST /entries` with `Content-Type: application/json` and the JSON body
 `{"plate": "<licence plate>"}`. Parameters of the content type are allowed and do not change how the
 body is read: any `charset`, for example `charset=utf-8` or `charset=iso-8859-1`, is accepted, and
-the body is always read as UTF-8.
+the body is always read as UTF-8. A byte sequence that is not valid UTF-8 is read as the replacement
+character U+FFFD and then handled like any other character: inside the value of `plate` it makes the
+plate `invalid_plate`; anywhere else it makes the request not well formed, `invalid_request`. For
+example, with `charset=iso-8859-1`, the body `{"plate":"<byte 0xD1>AB123"}`, which is `ÑAB123` in
+ISO-8859-1, is `400 invalid_plate`, the same answer as `ÑAB123` sent in UTF-8.
 
 | Case                                          | Status | Body                                                             |
 | --------------------------------------------- | ------ | ---------------------------------------------------------------- |
@@ -14,6 +18,7 @@ the body is always read as UTF-8.
 | `plate` is a string that is not a valid plate | 400    | `{"error": "invalid_plate"}`                                     |
 | The request is not well formed (list below)   | 400    | `{"error": "invalid_request"}`                                   |
 | The body is larger than 1 MiB                 | 413    | `{"error": "invalid_request"}`                                   |
+| Unknown route or method                       | 404    | `{"error": "not_found"}`                                         |
 | Unexpected failure of the server              | 500    | `{"error": "internal_error"}`                                    |
 
 A request is not well formed, and gets `400 invalid_request`, when any of these holds:
@@ -28,7 +33,7 @@ A request is not well formed, and gets `400 invalid_request`, when any of these 
 - the body has any field other than `plate`, for example `enteredAt`; extra fields are never
   silently dropped;
 - the framework rejects the request for any other fault of the request itself, for example an
-  invalid `Content-Length`, except a body that is too large (below).
+  invalid `Content-Length`, except a body that is too large and an unknown route or method (below).
 
 A body that repeats the `plate` key is well formed: the last value is the one used. For example
 `{"plate": "TEST005", "plate": "TEST006"}` registers `TEST006`, and
@@ -40,7 +45,14 @@ and records nothing; the check runs before any other.
 An unexpected failure is any failure that is not one of the cases above, for example a database
 that is locked, read only or on a full disk. It gets `500` with exactly the body
 `{"error": "internal_error"}`: no message, error code, stack trace, SQL or file path of the server.
-This holds for every route of the API, `GET /health` included.
+This holds for every route of the API, `GET /health` included: a health check whose database does
+not answer gets the same `500` and the same body.
+
+The API has two routes: `POST /entries` and `GET /health`; `HEAD /health` answers like
+`GET /health` without a body, as HTTP requires of every `GET` route. Any other path, for example
+`POST /entry`, and any other method on these paths, for example `GET /entries` or `POST /health`,
+gets `404` with the body `{"error": "not_found"}` and records nothing; it is neither
+`400 invalid_request` nor `405`.
 
 Further rules:
 
@@ -66,9 +78,14 @@ which tells it apart without a new code. 1 MiB is the framework's default limit 
 valid request. Internal details in a 500 would expose the server's database and files to the client
 and are of no use to the booth, which can only retry or call for help. Reading the body always as
 UTF-8 follows RFC 8259, which requires UTF-8 for JSON exchanged between systems; a plate is ASCII,
-so the charset makes no difference to a valid plate. The last value of a repeated key is how
-standard JSON parsers read it; rejecting it would need a parser of its own for a case the booth does
-not send.
+so the charset makes no difference to a valid plate. Reading bytes that are not UTF-8 as U+FFFD,
+instead of rejecting the whole body, keeps one rule for every plate the booth cannot send: a
+character outside ASCII, however it was encoded, is a plate mistake the staff can correct. The last
+value of a repeated key is how standard JSON parsers read it; rejecting it would need a parser of its
+own for a case the booth does not send. An unknown route or method is not a fault in a request to this API but a request to
+something the API does not have, so it keeps the standard 404 of HTTP and gets a code of its own in
+the same shape; 404 for a wrong method on a known path, rather than 405, spares the booth a case
+that calls for the same action, fixing its software.
 
 ## Licence plate
 

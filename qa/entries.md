@@ -42,31 +42,44 @@
    Expected: `400 Bad Request` and the body `{"error":"invalid_request"}`.
 10. Repeat step 2 replacing the header with `-H 'Content-Type: text/plain'`.
     Expected: `400 Bad Request` (not `415`) and the body `{"error":"invalid_request"}`.
-11. Repeat step 2 with a body larger than 1 MiB:
-    `printf '{"plate":"%s"}' "$(head -c 1100000 /dev/zero | tr '\0' A)" | curl -i -X POST http://127.0.0.1:3000/entries -H 'Content-Type: application/json' --data-binary @-`
+11. Repeat step 2 with a valid plate followed by more than 1 MiB of spaces, which are valid JSON
+    whitespace:
+    `{ printf '{"plate":"TEST008"}'; head -c 1100000 /dev/zero | tr '\0' ' '; } | curl -i -X POST http://127.0.0.1:3000/entries -H 'Content-Type: application/json' --data-binary @-`
     Expected: `413 Payload Too Large` and the body `{"error":"invalid_request"}`.
-12. Repeat step 2 with `{"plate":"TEST003"}`, then with `{"plate":"1234"}`.
-    Expected: `201 Created` both times, which shows that steps 7 to 9 and 11 recorded nothing.
+12. Repeat step 2 with `{"plate":"TEST003"}`, then with `{"plate":"1234"}`, then with
+    `{"plate":"TEST008"}`.
+    Expected: `201 Created` all three times, which shows that steps 7 to 9 and 11 recorded nothing.
 
 ## Accepted variants of a request
 
 13. Repeat step 2 replacing the header with
     `-H 'Content-Type: application/json; charset=iso-8859-1'` and the body `{"plate":"TEST004"}`.
     Expected: `201 Created` and `"plate":"TEST004"` in the body.
-14. Repeat step 2 with the body `{"plate":"TEST005","plate":"TEST006"}`.
+14. Send the plate `ÑAB123` encoded in ISO-8859-1, where `Ñ` is the single byte `0xD1`, which is not
+    valid UTF-8:
+    `printf '{"plate":"\321AB123"}' | curl -i -X POST http://127.0.0.1:3000/entries -H 'Content-Type: application/json; charset=iso-8859-1' --data-binary @-`
+    Expected: `400 Bad Request` and the body `{"error":"invalid_plate"}`.
+15. Repeat step 2 with the body `{"plate":"TEST005","plate":"TEST006"}`.
     Expected: `201 Created` and `"plate":"TEST006"` in the body; repeating step 2 with
     `{"plate":"TEST005"}` then gives `201 Created`, which shows that only `TEST006` was recorded.
 
+## An unknown route or method
+
+16. `curl -i http://127.0.0.1:3000/entries`, then
+    `curl -i -X POST http://127.0.0.1:3000/entry -H 'Content-Type: application/json' -d '{"plate":"TEST009"}'`.
+    Expected: `404 Not Found` and the body `{"error":"not_found"}` both times; repeating step 2
+    with `{"plate":"TEST009"}` then gives `201 Created`, which shows that nothing was recorded.
+
 ## The entry survives a restart
 
-15. Stop the server, start it again as in step 1 without deleting the database, and repeat step 2.
+17. Stop the server, start it again as in step 1 without deleting the database, and repeat step 2.
     Expected: `409 Conflict` and the body `{"error":"vehicle_already_inside"}`.
 
 ## An unexpected failure
 
-16. Stop the server, run `chmod 444 data/qa-entries.db`, start the server again as in step 1
+18. Stop the server, run `chmod 444 data/qa-entries.db`, start the server again as in step 1
     without deleting the database, and repeat step 2 with `{"plate":"TEST007"}`.
     Expected: `500 Internal Server Error` and exactly the body `{"error":"internal_error"}`, with no
     message, error code, SQL or path such as `readonly` or `qa-entries.db`.
-17. Stop the server and run `chmod 644 data/qa-entries.db`.
+19. Stop the server and run `chmod 644 data/qa-entries.db`.
     Expected: the file is writable again.

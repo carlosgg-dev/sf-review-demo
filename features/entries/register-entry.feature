@@ -82,3 +82,9 @@ Feature: Register a vehicle entry
     Given the database cannot record entries
     When the booth registers the entry of plate "1234ABC"
     Then the entry fails with an internal error and no internal details
+
+  @issue-1
+  Scenario: A failing health check shows no internal details
+    Given the database cannot answer
+    When the booth checks the health of the server
+    Then the request fails with an internal error and no internal details
