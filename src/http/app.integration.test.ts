@@ -2,6 +2,7 @@ import { connect } from "node:net";
 import type { AddressInfo } from "node:net";
 import type { FastifyInstance } from "fastify";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { CheckOut } from "../application/check-out.ts";
 import { RegisterEntry } from "../application/register-entry.ts";
 import { buildApp } from "./app.ts";
 
@@ -19,11 +20,18 @@ describe("the app on a real HTTP server", () => {
   let port: number;
 
   beforeAll(async () => {
-    const vehicles = { add: () => undefined };
+    const vehicles = {
+      add: () => undefined,
+      remove: (plate: string) => ({
+        plate,
+        enteredAt: Temporal.Instant.from("2026-11-13T08:00:00Z"),
+      }),
+    };
     const clock = { now: () => Temporal.Instant.from("2026-11-13T08:15:00Z") };
     app = buildApp({
       database: { ping: () => undefined },
       registerEntry: new RegisterEntry(clock, vehicles),
+      checkOut: new CheckOut(clock, vehicles),
     });
     await app.listen({ host: "127.0.0.1", port: 0 });
     port = (app.server.address() as AddressInfo).port;
@@ -67,6 +75,7 @@ describe("the app on a real HTTP server", () => {
 
   it.each([
     ["an unknown route", "/entries", "404 Not Found"],
+    ["the exit route", "/exits", "404 Not Found"],
     ["a path that cannot be decoded", "/%c0", "400 Bad Request"],
   ])("answers HEAD to %s with its status and no body", async (_case, path, status) => {
     const response = await exchange(

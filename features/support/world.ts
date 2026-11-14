@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { After, Before, setWorldConstructor, World } from "@cucumber/cucumber";
 import type { FastifyInstance, InjectOptions, LightMyRequestResponse } from "fastify";
+import { CheckOut, type Exit } from "../../src/application/check-out.ts";
 import { RegisterEntry } from "../../src/application/register-entry.ts";
 import { buildApp } from "../../src/http/app.ts";
 import { Database } from "../../src/persistence/database.ts";
@@ -17,15 +18,42 @@ export class ParkingWorld extends World {
   #database: Database | undefined;
   #lock: DatabaseSync | undefined;
   #app: FastifyInstance | undefined;
+  #registerEntry: RegisterEntry | undefined;
+  #checkOut: CheckOut | undefined;
+  #exit: Exit | undefined;
 
   start(): void {
     this.#directory = mkdtempSync(join(tmpdir(), "parking-acceptance-"));
     this.#database = new Database(this.#databasePath());
     const clock = { now: () => this.now };
+    const parkedVehicles = new SqliteParkedVehicles(this.#database.connection);
+    this.#registerEntry = new RegisterEntry(clock, parkedVehicles);
+    this.#checkOut = new CheckOut(clock, parkedVehicles);
     this.#app = buildApp({
       database: this.#database,
-      registerEntry: new RegisterEntry(clock, new SqliteParkedVehicles(this.#database.connection)),
+      registerEntry: this.#registerEntry,
+      checkOut: this.#checkOut,
     });
+  }
+
+  /** The use cases the app runs, for the fee rules checked below the interface. */
+  get registerEntry(): RegisterEntry {
+    return started(this.#registerEntry);
+  }
+
+  get checkOut(): CheckOut {
+    return started(this.#checkOut);
+  }
+
+  get exit(): Exit {
+    if (this.#exit === undefined) {
+      throw new Error("no vehicle has left");
+    }
+    return this.#exit;
+  }
+
+  set exit(exit: Exit) {
+    this.#exit = exit;
   }
 
   async stop(): Promise<void> {
@@ -37,10 +65,13 @@ export class ParkingWorld extends World {
     rmSync(this.#directory, { recursive: true, force: true });
   }
 
-  /** Another connection holds the write lock, so the app's writes fail as on a locked database. */
+  /**
+   * Another connection holds the write lock, so the app's writes fail as on a locked database while
+   * the rows can still be read.
+   */
   lockDatabase(): void {
     this.#lock = new DatabaseSync(this.#databasePath());
-    this.#lock.exec("BEGIN EXCLUSIVE");
+    this.#lock.exec("BEGIN IMMEDIATE");
   }
 
   closeDatabase(): void {
@@ -48,14 +79,14 @@ export class ParkingWorld extends World {
   }
 
   async postEntry(body: string, contentType: string): Promise<LightMyRequestResponse> {
-    return this.postEntryTo("/entries", body, contentType);
+    return this.postTo("/entries", body, contentType);
   }
 
-  async postEntryTo(
-    url: string,
-    body: string,
-    contentType: string,
-  ): Promise<LightMyRequestResponse> {
+  async postExit(body: string, contentType: string): Promise<LightMyRequestResponse> {
+    return this.postTo("/exits", body, contentType);
+  }
+
+  async postTo(url: string, body: string, contentType: string): Promise<LightMyRequestResponse> {
     return this.#send({
       method: "POST",
       url,
@@ -69,10 +100,7 @@ export class ParkingWorld extends World {
   }
 
   async #send(request: InjectOptions): Promise<LightMyRequestResponse> {
-    if (this.#app === undefined) {
-      throw new Error("the app has not started");
-    }
-    this.response = await this.#app.inject(request);
+    this.response = await started(this.#app).inject(request);
     return this.response;
   }
 
@@ -87,6 +115,13 @@ export class ParkingWorld extends World {
   #databasePath(): string {
     return join(this.#directory, "parking.db");
   }
+}
+
+function started<T>(part: T | undefined): T {
+  if (part === undefined) {
+    throw new Error("the app has not started");
+  }
+  return part;
 }
 
 setWorldConstructor(ParkingWorld);
