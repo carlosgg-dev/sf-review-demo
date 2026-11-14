@@ -9,8 +9,15 @@ function unescape(plate: string): string {
   );
 }
 
+/** The scenarios write the three bytes of a UTF-8 byte order mark in a body as [BOM]. */
+const BOM = "\uFEFF";
+
+function entryOf(plate: string): string {
+  return JSON.stringify({ plate: unescape(plate) });
+}
+
 function registerEntry(world: ParkingWorld, plate: string) {
-  return world.postEntry(JSON.stringify({ plate: unescape(plate) }), "application/json");
+  return world.postEntry(entryOf(plate), "application/json");
 }
 
 function assertRejected(world: ParkingWorld, status: number, error: string): void {
@@ -53,7 +60,21 @@ When(
 When(
   "the booth sends an entry request with content type {string} and body {string}",
   async function (this: ParkingWorld, contentType: string, body: string) {
-    await this.postEntry(body, contentType);
+    await this.postEntry(body.replaceAll("[BOM]", BOM), contentType);
+  },
+);
+
+When(
+  "the booth registers the entry of plate {string} with a byte order mark before the body",
+  async function (this: ParkingWorld, plate: string) {
+    await this.postEntry(BOM + entryOf(plate), "application/json");
+  },
+);
+
+When(
+  "the booth sends the entry of plate {string} to the path {string}",
+  async function (this: ParkingWorld, plate: string, path: string) {
+    await this.postEntryTo(path, entryOf(plate), "application/json");
   },
 );
 
@@ -83,6 +104,15 @@ Then("the entry is rejected because the plate is not valid", function (this: Par
 Then("the entry is rejected because the request is not valid", function (this: ParkingWorld) {
   assertRejected(this, 400, "invalid_request");
 });
+
+Then(
+  "the request is rejected because it is not valid, without repeating the URL",
+  function (this: ParkingWorld) {
+    // The exact body leaves no room for any part of the URL.
+    assertRejected(this, 400, "invalid_request");
+    assert.equal(this.response?.body, '{"error":"invalid_request"}');
+  },
+);
 
 Then(
   "the vehicle with plate {string} is recorded as inside since {string}",

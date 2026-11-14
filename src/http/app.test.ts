@@ -9,6 +9,7 @@ import { buildApp } from "./app.ts";
 
 const ONE_MIB = 1024 * 1024;
 const INTERNAL_ERROR = { error: "internal_error" };
+const BOM = "\uFEFF";
 
 function appWith({
   ping = () => undefined,
@@ -87,6 +88,30 @@ describe("an unknown route or method", () => {
   });
 });
 
+describe("a URL whose path cannot be decoded", () => {
+  it.each([
+    ["GET", "/%c0"],
+    ["POST", "/entries%c0"],
+    ["POST", "/entries%zz"],
+    ["GET", "/%zz"],
+    ["GET", "/health%"],
+    ["GET", "/%E0%A4%A"],
+  ] as const)("rejects %s %s without repeating the URL", async (method, url) => {
+    const inside: ParkedVehicle[] = [];
+
+    const response = await appWith({ inside }).inject({
+      method,
+      url,
+      payload: '{"plate":"TEST014"}',
+      headers: { "content-type": "application/json" },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.body).toBe('{"error":"invalid_request"}');
+    expect(inside).toEqual([]);
+  });
+});
+
 describe("POST /entries", () => {
   const post = (
     app: ReturnType<typeof appWith>,
@@ -161,19 +186,16 @@ describe("POST /entries", () => {
     expect(inside).toEqual([]);
   });
 
-  it.each(["utf-8", "iso-8859-1", "windows-1252"])(
-    "reads the body as UTF-8 whatever the charset %s",
-    async (charset) => {
-      const response = await post(
-        appWith(),
-        '{"plate":"TEST004"}',
-        `application/json; charset=${charset}`,
-      );
+  it.each(["utf-8", "iso-8859-1", "windows-1252"])("accepts any charset %s", async (charset) => {
+    const response = await post(
+      appWith(),
+      '{"plate":"TEST004"}',
+      `application/json; charset=${charset}`,
+    );
 
-      expect(response.statusCode).toBe(201);
-      expect(response.json()).toMatchObject({ plate: "TEST004" });
-    },
-  );
+    expect(response.statusCode).toBe(201);
+    expect(response.json()).toMatchObject({ plate: "TEST004" });
+  });
 
   it("reads a byte that is not UTF-8 inside the plate as a character that is not on a plate", async () => {
     const body = Buffer.concat([
@@ -195,6 +217,49 @@ describe("POST /entries", () => {
 
     expect(response.statusCode).toBe(400);
     expect(response.json()).toEqual({ error: "invalid_request" });
+  });
+
+  it("ignores one byte order mark before the body", async () => {
+    const inside: ParkedVehicle[] = [];
+
+    const response = await post(
+      appWith({ inside }),
+      `${BOM}{"plate":"TEST003"}`,
+      "application/json",
+    );
+
+    expect(response.statusCode).toBe(201);
+    expect(inside.map(({ plate }) => plate)).toEqual(["TEST003"]);
+  });
+
+  it.each([
+    ["two byte order marks", `${BOM}${BOM}{"plate":"TEST003"}`],
+    ["only a byte order mark", BOM],
+    ["a byte order mark after whitespace", ` ${BOM}{"plate":"TEST003"}`],
+    ["a byte order mark after the JSON value", `{"plate":"TEST003"}${BOM}`],
+  ])("rejects a body with %s as a malformed request", async (_case, payload) => {
+    const response = await post(appWith(), payload, "application/json");
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({ error: "invalid_request" });
+  });
+
+  it("rejects a byte order mark inside the plate as a plate that is not valid", async () => {
+    const response = await post(appWith(), `{"plate":"${BOM}TEST003"}`, "application/json");
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({ error: "invalid_plate" });
+  });
+
+  it("does not read a query string that cannot be decoded", async () => {
+    const response = await appWith().inject({
+      method: "POST",
+      url: "/entries?a=%c0",
+      payload: '{"plate":"TEST003"}',
+      headers: { "content-type": "application/json" },
+    });
+
+    expect(response.statusCode).toBe(201);
   });
 
   it("uses the last value of a repeated plate", async () => {

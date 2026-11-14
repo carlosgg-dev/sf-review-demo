@@ -1,4 +1,5 @@
-import Fastify, { errorCodes, type FastifyInstance } from "fastify";
+import type { Duplex } from "node:stream";
+import Fastify, { errorCodes, type FastifyInstance, type FastifyReply } from "fastify";
 import {
   InvalidPlate,
   type RegisterEntry,
@@ -17,6 +18,16 @@ export interface Services {
 
 /** 1 MiB, the limit of the contract. */
 const BODY_LIMIT = 1024 * 1024;
+
+const MALFORMED_REQUEST_BODY = JSON.stringify({ error: "invalid_request" });
+
+const MALFORMED_REQUEST_RESPONSE =
+  "HTTP/1.1 400 Bad Request\r\n" +
+  "Content-Type: application/json; charset=utf-8\r\n" +
+  `Content-Length: ${String(Buffer.byteLength(MALFORMED_REQUEST_BODY))}\r\n` +
+  "Connection: close\r\n" +
+  "\r\n" +
+  MALFORMED_REQUEST_BODY;
 
 /** Fastify marks each rejection of the request itself with the HTTP status it calls for. */
 type ServerError = Error & { readonly statusCode?: number };
@@ -38,6 +49,11 @@ export function buildApp({ database, registerEntry }: Services): FastifyInstance
   const app = Fastify({
     bodyLimit: BODY_LIMIT,
     ajv: { customOptions: { coerceTypes: false, removeAdditional: false } },
+    // A path that cannot be decoded is rejected before the hooks and the error handler run.
+    frameworkErrors: (error, _request, reply) => {
+      void reject(reply, error);
+    },
+    clientErrorHandler: rejectMalformedRequest,
   });
 
   rejectFaultyRequests(app);
@@ -86,10 +102,21 @@ function rejectFaultyRequests(app: FastifyInstance): void {
     done(new errorCodes.FST_ERR_CTP_INVALID_MEDIA_TYPE(), undefined);
   });
 
-  app.setErrorHandler<ServerError>(async (error, _request, reply) => {
-    const rejection = rejectionOf(error);
-    return reply.code(rejection.status).send({ error: rejection.code });
-  });
+  app.setErrorHandler<ServerError>(async (error, _request, reply) => reject(reply, error));
+}
+
+function reject(reply: FastifyReply, error: ServerError): FastifyReply {
+  const rejection = rejectionOf(error);
+  return reply.code(rejection.status).send({ error: rejection.code });
+}
+
+/**
+ * Node's HTTP parser rejects a request with an invalid Content-Length before Fastify sees it. The
+ * contract leaves every other fault found there out of scope, so one answer serves them all.
+ */
+function rejectMalformedRequest(_error: Error, socket: Duplex): void {
+  socket.write(MALFORMED_REQUEST_RESPONSE);
+  socket.destroy();
 }
 
 function rejectionOf(error: ServerError): Rejection {

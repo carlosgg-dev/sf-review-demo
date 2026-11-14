@@ -48,9 +48,17 @@ export class ParkingWorld extends World {
   }
 
   async postEntry(body: string, contentType: string): Promise<LightMyRequestResponse> {
+    return this.postEntryTo("/entries", body, contentType);
+  }
+
+  async postEntryTo(
+    url: string,
+    body: string,
+    contentType: string,
+  ): Promise<LightMyRequestResponse> {
     return this.#send({
       method: "POST",
-      url: "/entries",
+      url,
       headers: { "content-type": contentType },
       payload: body,
     });
