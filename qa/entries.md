@@ -49,21 +49,25 @@
 12. Repeat step 2 with `{"plate":"TEST003"}`, then with `{"plate":"1234"}`, then with
     `{"plate":"TEST008"}`.
     Expected: `201 Created` all three times, which shows that steps 7 to 9 and 11 recorded nothing.
-13. Send the valid body to a path that cannot be decoded, then a request with an unknown path that
+13. Send the valid body to a path that cannot be decoded, then requests with unknown paths that
     cannot be decoded:
     `curl -i -X POST 'http://127.0.0.1:3000/entries%c0' -H 'Content-Type: application/json' -d '{"plate":"TEST014"}'`,
-    then `curl -i --path-as-is 'http://127.0.0.1:3000/%c0'`.
-    Expected: `400 Bad Request` (not `404`) and exactly the body `{"error":"invalid_request"}` both
-    times, with no `%c0` or other part of the URL in it; repeating step 2 with `{"plate":"TEST014"}`
-    then gives `201 Created`, which shows that nothing was recorded.
-14. Send a request with an invalid `Content-Length`, then one with two `Content-Length` headers:
+    then `curl -i --path-as-is 'http://127.0.0.1:3000/%c0'`, then
+    `curl -i --path-as-is 'http://127.0.0.1:3000/%zz'`, then
+    `curl -i --path-as-is 'http://127.0.0.1:3000/health%'`.
+    Expected: `400 Bad Request` (not `404`) and exactly the body `{"error":"invalid_request"}` all
+    four times, with no `%c0`, `%zz` or other part of the URL in it; repeating step 2 with
+    `{"plate":"TEST014"}` then gives `201 Created`, which shows that nothing was recorded.
+14. Send a request with an invalid `Content-Length`, then the same request with the value
+    `99999999999999999999` and with an empty value instead of `abc`, then one with two
+    `Content-Length` headers:
     `printf 'POST /entries HTTP/1.1\r\nHost: x\r\nContent-Type: application/json\r\nContent-Length: abc\r\n\r\n{"plate":"TEST015"}' | nc -w 2 127.0.0.1 3000`,
     then
     `printf 'POST /entries HTTP/1.1\r\nHost: x\r\nContent-Type: application/json\r\nContent-Length: 19\r\nContent-Length: 19\r\n\r\n{"plate":"TEST015"}' | nc -w 2 127.0.0.1 3000`.
-    Expected: `HTTP/1.1 400 Bad Request` and exactly the body `{"error":"invalid_request"}` both
-    times; repeating step 2 with `{"plate":"TEST015"}` then gives `201 Created`.
+    Expected: `HTTP/1.1 400 Bad Request` and exactly the body `{"error":"invalid_request"}` all
+    four times; repeating step 2 with `{"plate":"TEST015"}` then gives `201 Created`.
 
-## Accepted variants of a request
+## Variants of a request
 
 15. Repeat step 2 replacing the header with
     `-H 'Content-Type: application/json; charset=iso-8859-1'` and the body `{"plate":"TEST004"}`.
@@ -78,29 +82,45 @@
 18. Send a body that starts with a UTF-8 byte order mark:
     `printf '\357\273\277{"plate":"TEST016"}' | curl -i -X POST http://127.0.0.1:3000/entries -H 'Content-Type: application/json' --data-binary @-`
     Expected: `201 Created` and `"plate":"TEST016"` in the body.
+19. Send a byte order mark where it is not the very first bytes of the body: two of them before the
+    JSON, then one alone, then one at the start of the plate:
+    `printf '\357\273\277\357\273\277{"plate":"TEST017"}' | curl -i -X POST http://127.0.0.1:3000/entries -H 'Content-Type: application/json' --data-binary @-`,
+    then
+    `printf '\357\273\277' | curl -i -X POST http://127.0.0.1:3000/entries -H 'Content-Type: application/json' --data-binary @-`,
+    then
+    `printf '{"plate":"\357\273\277TEST017"}' | curl -i -X POST http://127.0.0.1:3000/entries -H 'Content-Type: application/json' --data-binary @-`.
+    Expected: `400 Bad Request` with the body `{"error":"invalid_request"}` the first two times and
+    `{"error":"invalid_plate"}` the third time; repeating step 2 with `{"plate":"TEST017"}` then
+    gives `201 Created`, which shows that nothing was recorded.
+20. Send a valid body to `POST /entries` with a query string that cannot be decoded:
+    `curl -i -X POST 'http://127.0.0.1:3000/entries?a=%c0' -H 'Content-Type: application/json' -d '{"plate":"TEST018"}'`.
+    Expected: `201 Created` and `"plate":"TEST018"` in the body.
 
 ## An unknown route or method
 
-19. `curl -i http://127.0.0.1:3000/entries`, then
+21. `curl -i http://127.0.0.1:3000/entries`, then
     `curl -i -X POST http://127.0.0.1:3000/entry -H 'Content-Type: application/json' -d '{"plate":"TEST009"}'`.
     Expected: `404 Not Found` and the body `{"error":"not_found"}` both times; repeating step 2
     with `{"plate":"TEST009"}` then gives `201 Created`, which shows that nothing was recorded.
-20. Send to the unknown route bodies that `POST /entries` would reject:
+22. Send to the unknown route bodies that `POST /entries` would reject:
     `curl -i -X POST http://127.0.0.1:3000/entry -H 'Content-Type: text/plain' -d '{"plate":"TEST010"}'`,
     then
     `{ printf '{"plate":"TEST010"}'; head -c 1100000 /dev/zero | tr '\0' ' '; } | curl -i -X POST http://127.0.0.1:3000/entry -H 'Content-Type: application/json' --data-binary @-`.
     Expected: `404 Not Found` and the body `{"error":"not_found"}` both times, not `400` or `413`.
+23. Send `HEAD` requests that fail: `curl -i -I http://127.0.0.1:3000/entries`, then
+    `curl -i -I --path-as-is 'http://127.0.0.1:3000/%c0'`.
+    Expected: `404 Not Found` the first time and `400 Bad Request` the second, both with no body.
 
 ## The entry survives a restart
 
-21. Stop the server, start it again as in step 1 without deleting the database, and repeat step 2.
+24. Stop the server, start it again as in step 1 without deleting the database, and repeat step 2.
     Expected: `409 Conflict` and the body `{"error":"vehicle_already_inside"}`.
 
 ## An unexpected failure
 
-22. Stop the server, run `chmod 444 data/qa-entries.db`, start the server again as in step 1
+25. Stop the server, run `chmod 444 data/qa-entries.db`, start the server again as in step 1
     without deleting the database, and repeat step 2 with `{"plate":"TEST007"}`.
     Expected: `500 Internal Server Error` and exactly the body `{"error":"internal_error"}`, with no
     message, error code, SQL or path such as `readonly` or `qa-entries.db`.
-23. Stop the server and run `chmod 644 data/qa-entries.db`.
+26. Stop the server and run `chmod 644 data/qa-entries.db`.
     Expected: the file is writable again.

@@ -3,7 +3,8 @@ Feature: Register a vehicle entry
   The exit booth staff register each vehicle that enters the car park by its licence plate.
   The server records the entry time; the booth cannot set it.
   In a plate written in these scenarios, \uXXXX stands for the single character with that Unicode
-  code point, for example \u00A0 for a non-breaking space.
+  code point, for example \u00A0 for a non-breaking space. In a body written in these scenarios,
+  [BOM] stands for the three bytes EF BB BF of a UTF-8 byte order mark.
 
   @issue-1
   Scenario Outline: A vehicle enters and the server records its entry time
@@ -60,6 +61,7 @@ Feature: Register a vehicle entry
       | tab                                    | 1234\u0009ABC |
       | non-breaking space                     | 1234\u00A0ABC |
       | en dash                                | 1234\u2013ABC |
+      | byte order mark at the start of plate  | \uFEFFTEST003 |
 
   @issue-1
   Scenario Outline: A request that is not well formed is rejected
@@ -68,14 +70,17 @@ Feature: Register a vehicle entry
     And no vehicle is inside
 
     Examples:
-      | case                     | content type     | body                                                        |
-      | the booth sends a time   | application/json | {"plate":"TEST003","enteredAt":"2026-01-01T00:00:00+01:00"} |
-      | plate is a number        | application/json | {"plate":1234}                                              |
-      | plate is missing         | application/json | {}                                                          |
-      | body is not an object    | application/json | ["TEST003"]                                                 |
-      | malformed JSON           | application/json | {"plate":"TEST003"                                          |
-      | empty body               | application/json |                                                             |
-      | content type is not JSON | text/plain       | {"plate":"TEST003"}                                         |
+      | case                                 | content type     | body                                                        |
+      | the booth sends a time               | application/json | {"plate":"TEST003","enteredAt":"2026-01-01T00:00:00+01:00"} |
+      | plate is a number                    | application/json | {"plate":1234}                                              |
+      | plate is missing                     | application/json | {}                                                          |
+      | body is not an object                | application/json | ["TEST003"]                                                 |
+      | malformed JSON                       | application/json | {"plate":"TEST003"                                          |
+      | empty body                           | application/json |                                                             |
+      | content type is not JSON             | text/plain       | {"plate":"TEST003"}                                         |
+      | two byte order marks                 | application/json | [BOM][BOM]{"plate":"TEST003"}                               |
+      | only a byte order mark               | application/json | [BOM]                                                       |
+      | byte order mark after the JSON value | application/json | {"plate":"TEST003"}[BOM]                                    |
 
   @issue-1
   Scenario: A body that starts with a byte order mark is accepted
@@ -94,6 +99,15 @@ Feature: Register a vehicle entry
       | case                                       | path        |
       | unknown path                               | /%c0        |
       | entries path with a byte that is not UTF-8 | /entries%c0 |
+      | malformed percent escape                   | /%zz        |
+      | percent sign at the end of the path        | /health%    |
+
+  @issue-1
+  Scenario: The query string of the URL does not change the answer
+    Given the server clock reads "2026-11-13 09:15:00" in Europe/Madrid
+    When the booth sends the entry of plate "TEST003" to the path "/entries?a=%c0"
+    Then the entry is accepted
+    And the response shows plate "TEST003" entered at "2026-11-13T09:15:00+01:00"
 
   @issue-1
   Scenario: An unexpected failure of the server shows no internal details

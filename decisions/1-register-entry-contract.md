@@ -44,9 +44,12 @@ A request is not well formed, and gets `400 invalid_request`, when any of these 
   `/%zz` or `/health%`, or whose bytes are not valid UTF-8, for example `GET /%c0` or
   `POST /entries%c0`; this holds on any path and with any method, and the answer never repeats the
   URL;
-- the `Content-Length` header is invalid: its value is not made only of the digits `0`-`9`, for
-  example `abc`, `-5` or `0x10`, it is too large for the server to read, for example
-  `99999999999999999999`, or the request has more than one `Content-Length` header;
+- the `Content-Length` header is invalid: its value is empty or is not made only of the digits
+  `0`-`9`, for example `abc`, `-5`, `+5` or `0x10`; or it is larger than 18446744073709551615
+  (2^64 - 1), the largest length the HTTP parser of Node can hold, for example
+  `99999999999999999999`; or the request has more than one `Content-Length` header. Any value up to
+  that limit is valid, however large, and the other rules decide the answer: a `Content-Length` of
+  `2000000` with a body of that size is `413` on `POST /entries` and `404` on `POST /entry`;
 - the framework rejects the request for any other fault of the request itself, except a body that
   is too large and an unknown route or method (below).
 
@@ -119,21 +122,23 @@ size and form of its body never decide its answer.
 
 The error rules above are closed by this boundary.
 
-Guaranteed: the status and exactly the `{"error": "<code>"}` body set above for
-
-- every request that the HTTP parser of Node accepts and passes to the framework (Fastify), whatever
-  its route, method, headers or body, a URL whose path cannot be decoded included; and
-- every request whose `Content-Length` header is invalid, as defined above, which the HTTP parser of
-  Node rejects before the framework sees it.
+Guaranteed: the status and the `{"error": "<code>"}` body set above for every request that the HTTP
+server of Node passes to the framework (Fastify), whatever its route, method, headers or body, a URL
+whose path cannot be decoded included; and for every request with an invalid `Content-Length`, as
+defined above, that has no `Transfer-Encoding` header. A response to a `HEAD` request never has a
+body: it gets the status of its error only, for example `HEAD /entries` gets `404` and
+`HEAD /%c0` gets `400`.
 
 Out of scope, with no status, body or time of answer promised; the connection may be closed without
 an answer:
 
 - a `Content-Length` larger than the bytes actually sent: the server waits for the rest of the body
   until its own timeout ends the connection;
-- every other error of the HTTP parser of Node, for example a malformed request line, an invalid
-  header name or value, headers larger than the parser's limit, a `Content-Length` header together
-  with `Transfer-Encoding`, or a malformed chunked body.
+- everything else that the HTTP layer of Node, its parser or its server, answers or closes by itself
+  before the framework sees the request. For example a malformed request line, an invalid header,
+  headers larger than the parser's limit, a request with both `Transfer-Encoding` and
+  `Content-Length` whatever the value of `Content-Length`, a malformed chunked body, an HTTP/1.1
+  request without a `Host` header, or an `Expect` header other than `100-continue`.
 
 Reason: the booth talks to the API through a standard HTTP client, which sends requests that the
 parser of Node accepts. Every request that reaches the framework is one the API can answer in its
@@ -143,7 +148,11 @@ error the contract already named as a fault of the booth's software, so it keeps
 a standard client never sends it. The other parser errors are not requests a standard client sends,
 and answering each in the API's shape would mean taking over the parser's error handling for cases
 in which the booth has nothing different to do; leaving them out closes the error rules instead of
-promising a shape for every malformed byte stream. A path that cannot be decoded is a fault of the
+promising a shape for every malformed byte stream. The same holds for the answers the HTTP server of
+Node gives by itself, such as a missing `Host` or an unknown expectation, and for a request with both
+`Transfer-Encoding` and `Content-Length`: their conflict makes it a malformed byte stream whatever
+the value of `Content-Length`, so that rule wins over the one on an invalid `Content-Length`. HTTP
+forbids a body in the response to `HEAD`, so a `HEAD` request learns its error from the status. A path that cannot be decoded is a fault of the
 booth's request, not a request for something the API lacks, so it is `400 invalid_request` and not
 `404`; the answer never repeats the URL because no error body carries input or internal details. A
 byte order mark before the JSON is accepted because RFC 8259 allows a parser to ignore it and some
