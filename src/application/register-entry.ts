@@ -1,12 +1,7 @@
 import { normalisePlate } from "../domain/plate.ts";
+import { type Clock, currentSecond, inCarParkTime } from "./car-park-time.ts";
 
 export { InvalidPlate } from "../domain/plate.ts";
-
-const CAR_PARK_TIME_ZONE = "Europe/Madrid";
-
-export interface Clock {
-  now(): Temporal.Instant;
-}
 
 export interface ParkedVehicle {
   readonly plate: string;
@@ -37,8 +32,8 @@ export class RegisterEntry {
   /** Throws InvalidPlate or VehicleAlreadyInside. */
   register(typedPlate: string): Entry {
     const plate = normalisePlate(typedPlate);
-    const enteredAt = this.#clock.now().round({ smallestUnit: "second", roundingMode: "floor" });
+    const enteredAt = currentSecond(this.#clock);
     this.#vehicles.add({ plate, enteredAt });
-    return { plate, enteredAt: enteredAt.toZonedDateTimeISO(CAR_PARK_TIME_ZONE) };
+    return { plate, enteredAt: inCarParkTime(enteredAt) };
   }
 }

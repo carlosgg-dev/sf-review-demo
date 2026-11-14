@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import { Given, Then, When } from "@cucumber/cucumber";
+import { assertInternalError, assertRejected } from "../support/assertions.ts";
+import { madridClock } from "../support/clock.ts";
 import type { ParkingWorld } from "../support/world.ts";
 
 /** The scenarios write a character that cannot be typed in a table as \uXXXX. */
@@ -20,17 +22,10 @@ function registerEntry(world: ParkingWorld, plate: string) {
   return world.postEntry(entryOf(plate), "application/json");
 }
 
-function assertRejected(world: ParkingWorld, status: number, error: string): void {
-  assert.equal(world.response?.statusCode, status);
-  assert.deepEqual(world.response.json(), { error });
-}
-
 Given(
   "the server clock reads {string} in Europe\\/Madrid",
   function (this: ParkingWorld, clock: string) {
-    this.now = Temporal.PlainDateTime.from(clock.replace(" ", "T"))
-      .toZonedDateTime("Europe/Madrid")
-      .toInstant();
+    this.now = madridClock(clock);
   },
 );
 
@@ -74,7 +69,7 @@ When(
 When(
   "the booth sends the entry of plate {string} to the path {string}",
   async function (this: ParkingWorld, plate: string, path: string) {
-    await this.postEntryTo(path, entryOf(plate), "application/json");
+    await this.postTo(path, entryOf(plate), "application/json");
   },
 );
 
@@ -126,12 +121,6 @@ Then(
 Then("no vehicle is inside", function (this: ParkingWorld) {
   assert.deepEqual(this.parkedVehicles(), []);
 });
-
-function assertInternalError(world: ParkingWorld): void {
-  // The exact body leaves no room for a message, code, stack trace, SQL or path of the server.
-  assertRejected(world, 500, "internal_error");
-  assert.equal(world.response?.body, '{"error":"internal_error"}');
-}
 
 Then(
   "the entry fails with an internal error and no internal details",

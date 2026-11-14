@@ -1,5 +1,6 @@
 import type { Duplex } from "node:stream";
 import Fastify, { errorCodes, type FastifyInstance, type FastifyReply } from "fastify";
+import { type CheckOut, VehicleNotInside } from "../application/check-out.ts";
 import {
   InvalidPlate,
   type RegisterEntry,
@@ -14,6 +15,7 @@ export interface DatabaseHealth {
 export interface Services {
   readonly database: DatabaseHealth;
   readonly registerEntry: RegisterEntry;
+  readonly checkOut: CheckOut;
 }
 
 /** 1 MiB, the limit of the contract. */
@@ -37,14 +39,14 @@ interface Rejection {
   readonly code: string;
 }
 
-const entryRequest = {
+const plateRequest = {
   type: "object",
   required: ["plate"],
   additionalProperties: false,
   properties: { plate: { type: "string" } },
 } as const;
 
-export function buildApp({ database, registerEntry }: Services): FastifyInstance {
+export function buildApp({ database, registerEntry, checkOut }: Services): FastifyInstance {
   // Fastify converts types and drops unknown fields by default; the contract rejects both.
   const app = Fastify({
     bodyLimit: BODY_LIMIT,
@@ -62,20 +64,38 @@ export function buildApp({ database, registerEntry }: Services): FastifyInstance
     database.ping();
     return { status: "ok" };
   });
-
-  app.post<{ Body: { plate: string } }>(
-    "/entries",
-    { schema: { body: entryRequest } },
-    async (request, reply) => {
-      const entry = registerEntry.register(request.body.plate);
-      return reply.code(201).send({
-        plate: entry.plate,
-        enteredAt: entry.enteredAt.toString({ timeZoneName: "never" }),
-      });
-    },
-  );
+  addEntryRoute(app, registerEntry);
+  addExitRoute(app, checkOut);
 
   return app;
+}
+
+/** RFC 3339 with the offset of the car park at that instant. */
+function timestamp(time: Temporal.ZonedDateTime): string {
+  return time.toString({ timeZoneName: "never" });
+}
+
+function addEntryRoute(app: FastifyInstance, registerEntry: RegisterEntry): void {
+  app.post<{ Body: { plate: string } }>(
+    "/entries",
+    { schema: { body: plateRequest } },
+    async (request, reply) => {
+      const entry = registerEntry.register(request.body.plate);
+      return reply.code(201).send({ plate: entry.plate, enteredAt: timestamp(entry.enteredAt) });
+    },
+  );
+}
+
+function addExitRoute(app: FastifyInstance, checkOut: CheckOut): void {
+  app.post<{ Body: { plate: string } }>("/exits", { schema: { body: plateRequest } }, (request) => {
+    const exit = checkOut.checkOut(request.body.plate);
+    return {
+      plate: exit.plate,
+      enteredAt: timestamp(exit.enteredAt),
+      exitedAt: timestamp(exit.exitedAt),
+      feeCents: exit.feeCents,
+    };
+  });
 }
 
 /** Every request the API cannot serve gets one `{"error": "<code>"}` answer. */
@@ -125,6 +145,9 @@ function rejectionOf(error: ServerError): Rejection {
   }
   if (error instanceof VehicleAlreadyInside) {
     return { status: 409, code: "vehicle_already_inside" };
+  }
+  if (error instanceof VehicleNotInside) {
+    return { status: 409, code: "vehicle_not_inside" };
   }
   const status = error.statusCode ?? 500;
   if (status === 413) {
