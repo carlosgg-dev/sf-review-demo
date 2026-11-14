@@ -26,11 +26,12 @@ Feature: Register a vehicle entry
     And the response shows plate "<recorded plate>" entered at "2026-11-13T09:15:00+01:00"
 
     Examples:
-      | case                               | typed plate | recorded plate |
-      | hyphen and lower case              | 1234-abc    | 1234ABC        |
-      | spaces                             | 1234 ABC    | 1234ABC        |
-      | shortest plate                     | ab          | AB             |
-      | longest plate after normalisation  | ABCDE-12345 | ABCDE12345     |
+      | case                              | typed plate   | recorded plate |
+      | hyphen and lower case             | 1234-abc      | 1234ABC        |
+      | spaces                            | 1234 ABC      | 1234ABC        |
+      | space written as an escape        | 1234\u0020ABC | 1234ABC        |
+      | shortest plate                    | ab            | AB             |
+      | longest plate after normalisation | ABCDE-12345   | ABCDE12345     |
 
   @issue-1
   Scenario: A vehicle already inside cannot enter again and keeps its entry time
@@ -75,3 +76,9 @@ Feature: Register a vehicle entry
       | malformed JSON           | application/json | {"plate":"TEST003"                                          |
       | empty body               | application/json |                                                             |
       | content type is not JSON | text/plain       | {"plate":"TEST003"}                                         |
+
+  @issue-1
+  Scenario: An unexpected failure of the server shows no internal details
+    Given the database cannot record entries
+    When the booth registers the entry of plate "1234ABC"
+    Then the entry fails with an internal error and no internal details

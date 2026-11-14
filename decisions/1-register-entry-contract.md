@@ -2,8 +2,10 @@
 
 ## API contract
 
-`POST /entries` with `Content-Type: application/json` (parameters such as `charset=utf-8` allowed)
-and the JSON body `{"plate": "<licence plate>"}`.
+`POST /entries` with `Content-Type: application/json` and the JSON body
+`{"plate": "<licence plate>"}`. Parameters of the content type are allowed and do not change how the
+body is read: any `charset`, for example `charset=utf-8` or `charset=iso-8859-1`, is accepted, and
+the body is always read as UTF-8.
 
 | Case                                          | Status | Body                                                             |
 | --------------------------------------------- | ------ | ---------------------------------------------------------------- |
@@ -11,6 +13,8 @@ and the JSON body `{"plate": "<licence plate>"}`.
 | The normalised plate is already inside        | 409    | `{"error": "vehicle_already_inside"}`                            |
 | `plate` is a string that is not a valid plate | 400    | `{"error": "invalid_plate"}`                                     |
 | The request is not well formed (list below)   | 400    | `{"error": "invalid_request"}`                                   |
+| The body is larger than 1 MiB                 | 413    | `{"error": "invalid_request"}`                                   |
+| Unexpected failure of the server              | 500    | `{"error": "internal_error"}`                                    |
 
 A request is not well formed, and gets `400 invalid_request`, when any of these holds:
 
@@ -22,7 +26,21 @@ A request is not well formed, and gets `400 invalid_request`, when any of these 
 - `plate` is missing or is not a JSON string, for example `{"plate": 1234}` or `{"plate": null}`;
   values of another type are never converted to a string;
 - the body has any field other than `plate`, for example `enteredAt`; extra fields are never
-  silently dropped.
+  silently dropped;
+- the framework rejects the request for any other fault of the request itself, for example an
+  invalid `Content-Length`, except a body that is too large (below).
+
+A body that repeats the `plate` key is well formed: the last value is the one used. For example
+`{"plate": "TEST005", "plate": "TEST006"}` registers `TEST006`, and
+`{"plate": "TEST005", "plate": "12#4"}` is `invalid_plate`.
+
+A body larger than 1 MiB (1,048,576 bytes) gets `413` with the body `{"error": "invalid_request"}`
+and records nothing; the check runs before any other.
+
+An unexpected failure is any failure that is not one of the cases above, for example a database
+that is locked, read only or on a full disk. It gets `500` with exactly the body
+`{"error": "internal_error"}`: no message, error code, stack trace, SQL or file path of the server.
+This holds for every route of the API, `GET /health` included.
 
 Further rules:
 
@@ -40,6 +58,17 @@ malformed request, a wrong media type included, shares one status and one code b
 handles them the same way, as a fault of its own software; a separate 415 would add a case for the
 booth with no different action. Rejecting extra fields and other types, instead of dropping or
 converting them, is what makes "the booth cannot send an entry time" hold.
+
+Every error response of the API has the same `{"error": "<code>"}` shape, so the booth never has to
+parse a second format. A framework rejection of the request is a fault of the booth's software like
+the listed ones, so it shares their code; a body that is too large keeps the standard 413 status,
+which tells it apart without a new code. 1 MiB is the framework's default limit and is far above any
+valid request. Internal details in a 500 would expose the server's database and files to the client
+and are of no use to the booth, which can only retry or call for help. Reading the body always as
+UTF-8 follows RFC 8259, which requires UTF-8 for JSON exchanged between systems; a plate is ASCII,
+so the charset makes no difference to a valid plate. The last value of a repeated key is how
+standard JSON parsers read it; rejecting it would need a parser of its own for a case the booth does
+not send.
 
 ## Licence plate
 
