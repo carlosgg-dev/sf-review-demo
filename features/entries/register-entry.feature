@@ -78,6 +78,24 @@ Feature: Register a vehicle entry
       | content type is not JSON | text/plain       | {"plate":"TEST003"}                                         |
 
   @issue-1
+  Scenario: A body that starts with a byte order mark is accepted
+    Given the server clock reads "2026-11-13 09:15:00" in Europe/Madrid
+    When the booth registers the entry of plate "TEST003" with a byte order mark before the body
+    Then the entry is accepted
+    And the response shows plate "TEST003" entered at "2026-11-13T09:15:00+01:00"
+
+  @issue-1
+  Scenario Outline: A request to a URL that cannot be decoded is rejected
+    When the booth sends the entry of plate "TEST003" to the path "<path>"
+    Then the request is rejected because it is not valid, without repeating the URL
+    And no vehicle is inside
+
+    Examples:
+      | case                                       | path        |
+      | unknown path                               | /%c0        |
+      | entries path with a byte that is not UTF-8 | /entries%c0 |
+
+  @issue-1
   Scenario: An unexpected failure of the server shows no internal details
     Given the database cannot record entries
     When the booth registers the entry of plate "1234ABC"

@@ -11,6 +11,13 @@ plate `invalid_plate`; anywhere else it makes the request not well formed, `inva
 example, with `charset=iso-8859-1`, the body `{"plate":"<byte 0xD1>AB123"}`, which is `ÑAB123` in
 ISO-8859-1, is `400 invalid_plate`, the same answer as `ÑAB123` sent in UTF-8.
 
+One UTF-8 byte order mark (the bytes `EF BB BF`) as the very first bytes of the body is ignored, and
+the rest of the body is read as if it were not there: `<BOM>{"plate":"TEST003"}` registers `TEST003`.
+Anywhere else the byte order mark is the character U+FEFF and is handled like any other character:
+inside the value of `plate` it makes the plate `invalid_plate`; anywhere else, for example after a
+first byte order mark, after whitespace or after the JSON value, it makes the request
+`invalid_request`. A body that holds only a byte order mark is empty, so it is `invalid_request`.
+
 | Case                                          | Status | Body                                                             |
 | --------------------------------------------- | ------ | ---------------------------------------------------------------- |
 | Entry registered                              | 201    | `{"plate": "1234ABC", "enteredAt": "2026-11-13T09:15:00+01:00"}` |
@@ -32,8 +39,18 @@ A request is not well formed, and gets `400 invalid_request`, when any of these 
   values of another type are never converted to a string;
 - the body has any field other than `plate`, for example `enteredAt`; extra fields are never
   silently dropped;
-- the framework rejects the request for any other fault of the request itself, for example an
-  invalid `Content-Length`, except a body that is too large and an unknown route or method (below).
+- the path of the URL cannot be decoded: it has a percent escape that is malformed, for example
+  `/%zz` or `/health%`, or whose bytes are not valid UTF-8, for example `GET /%c0` or
+  `POST /entries%c0`; this holds on any path and with any method, and the answer never repeats the
+  URL;
+- the `Content-Length` header is invalid: its value is not made only of the digits `0`-`9`, for
+  example `abc`, `-5` or `0x10`, it is too large for the server to read, for example
+  `99999999999999999999`, or the request has more than one `Content-Length` header;
+- the framework rejects the request for any other fault of the request itself, except a body that
+  is too large and an unknown route or method (below).
+
+The query string of the URL is not read by any route and never changes the answer, even when it
+cannot be decoded: `POST /entries?a=%c0` with a valid body registers the entry.
 
 A body that repeats the `plate` key is well formed: the last value is the one used. For example
 `{"plate": "TEST005", "plate": "TEST006"}` registers `TEST006`, and
@@ -53,15 +70,18 @@ The API has two routes: `POST /entries` and `GET /health`; `HEAD /health` answer
 `GET /health` without a body, as HTTP requires of every `GET` route. Any other path, for example
 `POST /entry`, and any other method on these paths, for example `GET /entries` or `POST /health`,
 gets `404` with the body `{"error": "not_found"}` and records nothing; it is neither
-`400 invalid_request` nor `405`. The route check runs first, before the size and every other check
-on the body: `POST /entry` with a body larger than 1 MiB, with `Content-Type: text/plain` or with
-the body `{"plate":` gets `404 not_found`, not `413` or `400`.
+`400 invalid_request` nor `405`. Only a URL whose path cannot be decoded is checked before the
+route: `GET /%c0` is `400 invalid_request`, not `404`, because without a decoded path there is no
+route to look for. The route check runs next, before the size and every other check on the body:
+`POST /entry` with a body larger than 1 MiB, with `Content-Type: text/plain` or with the body
+`{"plate":` gets `404 not_found`, not `413` or `400`.
 
 Further rules:
 
-- The checks run in this order: known route and method, then body size, then well-formed request,
-  then valid plate, then already inside. A request that fails a check gets that check's error and
-  records nothing; an unexpected failure at any point gets `500 internal_error`.
+- The checks run in this order: valid `Content-Length` and path that can be decoded, then known
+  route and method, then body size, then the rest of the well-formed request, then valid plate, then
+  already inside. A request that fails a check gets that check's error and records nothing; an
+  unexpected failure at any point gets `500 internal_error`.
 - The body accepts no field other than `plate`, so the booth cannot send an entry time.
 - `plate` in the response is the normalised plate.
 - `enteredAt` is the entry time in Europe/Madrid, as an RFC 3339 date-time with offset and no
@@ -75,10 +95,10 @@ handles them the same way, as a fault of its own software; a separate 415 would 
 booth with no different action. Rejecting extra fields and other types, instead of dropping or
 converting them, is what makes "the booth cannot send an entry time" hold.
 
-Every error response of the API has the same `{"error": "<code>"}` shape, so the booth never has to
-parse a second format. A framework rejection of the request is a fault of the booth's software like
-the listed ones, so it shares their code; a body that is too large keeps the standard 413 status,
-which tells it apart without a new code. 1 MiB is the framework's default limit and is far above any
+Every error response of the API, within the scope set below, has the same `{"error": "<code>"}`
+shape, so the booth never has to parse a second format. A framework rejection of the request is a
+fault of the booth's software like the listed ones, so it shares their code; a body that is too
+large keeps the standard 413 status, which tells it apart without a new code. 1 MiB is the framework's default limit and is far above any
 valid request. Internal details in a 500 would expose the server's database and files to the client
 and are of no use to the booth, which can only retry or call for help. Reading the body always as
 UTF-8 follows RFC 8259, which requires UTF-8 for JSON exchanged between systems; a plate is ASCII,
@@ -90,9 +110,44 @@ own for a case the booth does not send. An unknown route or method is not a faul
 this API but a request to
 something the API does not have, so it keeps the standard 404 of HTTP and gets a code of its own in
 the same shape; 404 for a wrong method on a known path, rather than 405, spares the booth a case
-that calls for the same action, fixing its software. The route is checked first because the rules
-on the body belong to `POST /entries`: a request to something the API does not have has no body
-rules to break, and the size and form of its body never decide its answer.
+that calls for the same action, fixing its software. The route is checked before the body because
+the rules on the body belong to `POST /entries`: a request to something the API does not have has
+no body rules to break, and the size and form of its body never decide its answer.
+
+## Scope of the error rules
+
+The error rules above are closed by this boundary.
+
+Guaranteed: the status and exactly the `{"error": "<code>"}` body set above for
+
+- every request that the HTTP parser of Node accepts and passes to the framework (Fastify), whatever
+  its route, method, headers or body, a URL whose path cannot be decoded included; and
+- every request whose `Content-Length` header is invalid, as defined above, which the HTTP parser of
+  Node rejects before the framework sees it.
+
+Out of scope, with no status, body or time of answer promised; the connection may be closed without
+an answer:
+
+- a `Content-Length` larger than the bytes actually sent: the server waits for the rest of the body
+  until its own timeout ends the connection;
+- every other error of the HTTP parser of Node, for example a malformed request line, an invalid
+  header name or value, headers larger than the parser's limit, a `Content-Length` header together
+  with `Transfer-Encoding`, or a malformed chunked body.
+
+Reason: the booth talks to the API through a standard HTTP client, which sends requests that the
+parser of Node accepts. Every request that reaches the framework is one the API can answer in its
+own shape, so the rule holds there without exception. An invalid `Content-Length` is the one parser
+error the contract already named as a fault of the booth's software, so it keeps that answer. A
+`Content-Length` larger than the body cannot be told apart from a slow client until the timeout, and
+a standard client never sends it. The other parser errors are not requests a standard client sends,
+and answering each in the API's shape would mean taking over the parser's error handling for cases
+in which the booth has nothing different to do; leaving them out closes the error rules instead of
+promising a shape for every malformed byte stream. A path that cannot be decoded is a fault of the
+booth's request, not a request for something the API lacks, so it is `400 invalid_request` and not
+`404`; the answer never repeats the URL because no error body carries input or internal details. A
+byte order mark before the JSON is accepted because RFC 8259 allows a parser to ignore it and some
+clients add it; it carries no data, so rejecting it would turn a harmless encoding habit into a
+failed entry.
 
 ## Licence plate
 
