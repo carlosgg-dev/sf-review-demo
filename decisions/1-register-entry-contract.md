@@ -40,7 +40,8 @@ A body that repeats the `plate` key is well formed: the last value is the one us
 `{"plate": "TEST005", "plate": "12#4"}` is `invalid_plate`.
 
 A body larger than 1 MiB (1,048,576 bytes) gets `413` with the body `{"error": "invalid_request"}`
-and records nothing; the check runs before any other.
+and records nothing; the check runs right after the route check and before every check on the
+content of the body.
 
 An unexpected failure is any failure that is not one of the cases above, for example a database
 that is locked, read only or on a full disk. It gets `500` with exactly the body
@@ -52,12 +53,15 @@ The API has two routes: `POST /entries` and `GET /health`; `HEAD /health` answer
 `GET /health` without a body, as HTTP requires of every `GET` route. Any other path, for example
 `POST /entry`, and any other method on these paths, for example `GET /entries` or `POST /health`,
 gets `404` with the body `{"error": "not_found"}` and records nothing; it is neither
-`400 invalid_request` nor `405`.
+`400 invalid_request` nor `405`. The route check runs first, before the size and every other check
+on the body: `POST /entry` with a body larger than 1 MiB, with `Content-Type: text/plain` or with
+the body `{"plate":` gets `404 not_found`, not `413` or `400`.
 
 Further rules:
 
-- The checks run in this order: well-formed request, then valid plate, then already inside. A
-  request that fails a check gets that check's error and records nothing.
+- The checks run in this order: known route and method, then body size, then well-formed request,
+  then valid plate, then already inside. A request that fails a check gets that check's error and
+  records nothing; an unexpected failure at any point gets `500 internal_error`.
 - The body accepts no field other than `plate`, so the booth cannot send an entry time.
 - `plate` in the response is the normalised plate.
 - `enteredAt` is the entry time in Europe/Madrid, as an RFC 3339 date-time with offset and no
@@ -82,10 +86,13 @@ so the charset makes no difference to a valid plate. Reading bytes that are not 
 instead of rejecting the whole body, keeps one rule for every plate the booth cannot send: a
 character outside ASCII, however it was encoded, is a plate mistake the staff can correct. The last
 value of a repeated key is how standard JSON parsers read it; rejecting it would need a parser of its
-own for a case the booth does not send. An unknown route or method is not a fault in a request to this API but a request to
+own for a case the booth does not send. An unknown route or method is not a fault in a request to
+this API but a request to
 something the API does not have, so it keeps the standard 404 of HTTP and gets a code of its own in
 the same shape; 404 for a wrong method on a known path, rather than 405, spares the booth a case
-that calls for the same action, fixing its software.
+that calls for the same action, fixing its software. The route is checked first because the rules
+on the body belong to `POST /entries`: a request to something the API does not have has no body
+rules to break, and the size and form of its body never decide its answer.
 
 ## Licence plate
 

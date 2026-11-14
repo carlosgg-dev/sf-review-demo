@@ -69,17 +69,22 @@
     `curl -i -X POST http://127.0.0.1:3000/entry -H 'Content-Type: application/json' -d '{"plate":"TEST009"}'`.
     Expected: `404 Not Found` and the body `{"error":"not_found"}` both times; repeating step 2
     with `{"plate":"TEST009"}` then gives `201 Created`, which shows that nothing was recorded.
+17. Send to the unknown route bodies that `POST /entries` would reject:
+    `curl -i -X POST http://127.0.0.1:3000/entry -H 'Content-Type: text/plain' -d '{"plate":"TEST010"}'`,
+    then
+    `{ printf '{"plate":"TEST010"}'; head -c 1100000 /dev/zero | tr '\0' ' '; } | curl -i -X POST http://127.0.0.1:3000/entry -H 'Content-Type: application/json' --data-binary @-`.
+    Expected: `404 Not Found` and the body `{"error":"not_found"}` both times, not `400` or `413`.
 
 ## The entry survives a restart
 
-17. Stop the server, start it again as in step 1 without deleting the database, and repeat step 2.
+18. Stop the server, start it again as in step 1 without deleting the database, and repeat step 2.
     Expected: `409 Conflict` and the body `{"error":"vehicle_already_inside"}`.
 
 ## An unexpected failure
 
-18. Stop the server, run `chmod 444 data/qa-entries.db`, start the server again as in step 1
+19. Stop the server, run `chmod 444 data/qa-entries.db`, start the server again as in step 1
     without deleting the database, and repeat step 2 with `{"plate":"TEST007"}`.
     Expected: `500 Internal Server Error` and exactly the body `{"error":"internal_error"}`, with no
     message, error code, SQL or path such as `readonly` or `qa-entries.db`.
-19. Stop the server and run `chmod 644 data/qa-entries.db`.
+20. Stop the server and run `chmod 644 data/qa-entries.db`.
     Expected: the file is writable again.
