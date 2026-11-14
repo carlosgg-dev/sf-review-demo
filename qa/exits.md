@@ -50,8 +50,10 @@ taken between that command and the next one only add a few seconds to the stay.
     Expected: `400 Bad Request` (not `415`) and the body `{"error":"invalid_request"}` all three
     times.
 12. `curl -i http://127.0.0.1:3000/exits`, then
-    `curl -i -X POST http://127.0.0.1:3000/exit -H 'Content-Type: application/json' -d '{"plate":"TEST002"}'`.
-    Expected: `404 Not Found` and the body `{"error":"not_found"}` both times.
+    `curl -i -X POST http://127.0.0.1:3000/exit -H 'Content-Type: application/json' -d '{"plate":"TEST002"}'`,
+    then `curl -i -I http://127.0.0.1:3000/exits`.
+    Expected: `404 Not Found` and the body `{"error":"not_found"}` the first two times; `404 Not Found`
+    with no body the third time.
 13. `sqlite3 data/qa-exits.db "SELECT plate FROM parked_vehicles"`
     Expected: one row, `TEST002`; steps 10 to 12 closed no stay.
 

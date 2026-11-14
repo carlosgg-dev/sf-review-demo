@@ -47,6 +47,31 @@ Feature: Calculate the exit fee at the day rate
       | seven hours                          | 2026-11-13 16:00:00     | 1750 |
 
   @issue-2
+  Scenario Outline: A stay across a daylight saving change is charged for the time that really passed
+    Given the server clock reads the instant "<entered at>"
+    And the booth has registered the entry of plate "1234ABC"
+    And the server clock reads the instant "<exited at>"
+    When the booth registers the exit of plate "1234ABC"
+    Then the exit is accepted
+    And the response shows plate "1234ABC" entered at "<entered at>", exited at "<exited at>" with a fee of <fee> cents
+    And no vehicle is inside
+
+    Examples:
+      | case                          | entered at                | exited at                 | real stay | fee |
+      | the clocks go back an hour    | 2026-10-25T01:00:00+02:00 | 2026-10-25T02:00:00+01:00 | 2 hours   | 500 |
+      | the clocks go forward an hour | 2026-03-29T01:00:00+01:00 | 2026-03-29T03:00:00+02:00 | 1 hour    | 250 |
+
+  @issue-2
+  Scenario: An exit read from a clock moved backwards is free and shows the times as recorded
+    Given the server clock reads "2026-11-13 10:00:00" in Europe/Madrid
+    And the booth has registered the entry of plate "1234ABC"
+    And the server clock reads "2026-11-13 09:00:00" in Europe/Madrid
+    When the booth registers the exit of plate "1234ABC"
+    Then the exit is accepted
+    And the response shows plate "1234ABC" entered at "2026-11-13T10:00:00+01:00", exited at "2026-11-13T09:00:00+01:00" with a fee of 0 cents
+    And no vehicle is inside
+
+  @issue-2
   Scenario: A vehicle that is not inside cannot leave
     When the booth registers the exit of plate "1234ABC"
     Then the exit is rejected because the vehicle is not inside

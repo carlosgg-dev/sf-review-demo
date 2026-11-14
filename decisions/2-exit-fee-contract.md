@@ -34,7 +34,8 @@ The exit registered:
 - `plate` is the normalised plate, as in decision 1.
 - `enteredAt` is the entry time recorded at registration, in the format of decision 1.
 - `exitedAt` is the exit time, in the same format: Europe/Madrid, RFC 3339 with the offset Madrid has
-  at that instant and no fraction of a second.
+  at that instant and no fraction of a second. Each time carries its own offset, so a stay across a
+  daylight saving change shows different offsets in `enteredAt` and `exitedAt`.
 - `feeCents` is the fee in euro cents, a JSON integer: `500` is 5.00 €. A free stay is `0`.
 - The body has exactly these four fields.
 
@@ -52,8 +53,9 @@ that check's error and closes no stay.
 
 The API now has three routes: `POST /entries`, `POST /exits` and `GET /health` (with `HEAD /health`
 as in decision 1). This list replaces the list of two routes in decision 1; every other rule there
-about unknown routes and methods stays. `GET /exits`, `HEAD /exits` or `POST /exit`, for example, get
-`404 {"error": "not_found"}` and close no stay.
+about unknown routes and methods stays. `GET /exits` or `POST /exit`, for example, get
+`404 {"error": "not_found"}`; `HEAD /exits` gets `404` with no body, as every `HEAD` response in the
+section "Scope of the error rules" of decision 1. None of them closes a stay.
 
 Reason: the exit is the mirror of the entry, a booth action on a plate, so it takes the same request
 shape and the same error rules; the booth's software handles both routes in one way. The response
@@ -77,7 +79,11 @@ seconds, the same in the response, the calculation and a manual check.
 ## Fee at the day rate
 
 The stay lasts from the recorded entry instant to the exit instant, measured as real elapsed time in
-whole seconds; a daylight saving change does not add or remove an hour from it.
+whole seconds; a daylight saving change does not add or remove an hour from it. For example, from
+`2026-10-25T01:00:00+02:00` to `2026-10-25T02:00:00+01:00` is 2 hours (`500`), and from
+`2026-03-29T01:00:00+01:00` to `2026-03-29T03:00:00+02:00` is 1 hour (`250`). Every daylight saving
+change in Madrid falls in the night, so #3 will revise these two fees; until then they are charged at
+the day rate, as every block in this issue.
 
 - A stay of 30 minutes (1,800 seconds) or less is free: `0`.
 - After the first 30 minutes, the stay is charged in blocks of 60 minutes starting at minute 30. A
@@ -89,7 +95,11 @@ So `feeCents = 250 × ceil((seconds − 1800) / 3600)` when the stay is longer t
 1 h 30 min 01 s → `500`; 2 h 15 min → `500`; 7 h → `1750`.
 
 An exit instant earlier than the entry instant, which only a server clock moved backwards can
-produce, counts as a stay of 0 seconds: the fee is `0` and the exit is registered.
+produce, counts as a stay of 0 seconds: the fee is `0` and the exit is registered. Neither time is
+corrected: the response shows `enteredAt` as recorded and `exitedAt` as the clock read it, so
+`exitedAt` is earlier than `enteredAt`. For example, an entry at `2026-11-13T10:00:00+01:00` and an
+exit with the clock at `2026-11-13T09:00:00+01:00` answer `200` with those two times and
+`"feeCents": 0`, and the stay is closed.
 
 The fee is calculated in the domain layer, from the two instants, with no access to the clock or the
 database; issues #3 (night rate), #4 (daily cap) and #5 (lost ticket) extend that calculation.
@@ -99,7 +109,9 @@ asks for. Real elapsed time is what the driver actually stayed; counting wall-cl
 an hour that never passed in October, or skip one in March. The band of each block is out of scope
 here, so a block that starts at night still pays the day rate until #3 is delivered. A clock moved
 backwards is a server fault the booth cannot fix, and the vehicle must still be able to leave;
-charging nothing is the only fee that never overcharges.
+charging nothing is the only fee that never overcharges. Showing the times as recorded keeps the
+response truthful about what the server stored, and makes the clock fault visible to the staff
+instead of hiding it behind an invented time.
 
 ## Data model
 
