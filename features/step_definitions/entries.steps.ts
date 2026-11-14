@@ -27,6 +27,14 @@ Given(
   },
 );
 
+Given("the database cannot record entries", function (this: ParkingWorld) {
+  this.lockDatabase();
+});
+
+Given("the database cannot answer", function (this: ParkingWorld) {
+  this.closeDatabase();
+});
+
 Given(
   "the booth has registered the entry of plate {string}",
   async function (this: ParkingWorld, plate: string) {
@@ -48,6 +56,10 @@ When(
     await this.postEntry(body, contentType);
   },
 );
+
+When("the booth checks the health of the server", async function (this: ParkingWorld) {
+  await this.getHealth();
+});
 
 Then("the entry is accepted", function (this: ParkingWorld) {
   assert.equal(this.response?.statusCode, 201);
@@ -84,3 +96,23 @@ Then(
 Then("no vehicle is inside", function (this: ParkingWorld) {
   assert.deepEqual(this.parkedVehicles(), []);
 });
+
+function assertInternalError(world: ParkingWorld): void {
+  // The exact body leaves no room for a message, code, stack trace, SQL or path of the server.
+  assertRejected(world, 500, "internal_error");
+  assert.equal(world.response?.body, '{"error":"internal_error"}');
+}
+
+Then(
+  "the entry fails with an internal error and no internal details",
+  function (this: ParkingWorld) {
+    assertInternalError(this);
+  },
+);
+
+Then(
+  "the request fails with an internal error and no internal details",
+  function (this: ParkingWorld) {
+    assertInternalError(this);
+  },
+);

@@ -1,3 +1,4 @@
+import { Readable } from "node:stream";
 import { describe, expect, it } from "vitest";
 import {
   type ParkedVehicle,
@@ -6,13 +7,20 @@ import {
 } from "../application/register-entry.ts";
 import { buildApp } from "./app.ts";
 
+const ONE_MIB = 1024 * 1024;
+const INTERNAL_ERROR = { error: "internal_error" };
+
 function appWith({
   ping = () => undefined,
   now = "2026-11-13T08:15:00Z",
   inside = [] as ParkedVehicle[],
+  failure = undefined as Error | undefined,
 } = {}) {
   const vehicles = {
     add(vehicle: ParkedVehicle) {
+      if (failure !== undefined) {
+        throw failure;
+      }
       if (inside.some(({ plate }) => plate === vehicle.plate)) {
         throw new VehicleAlreadyInside();
       }
@@ -33,7 +41,7 @@ describe("GET /health", () => {
     expect(response.json()).toEqual({ status: "ok" });
   });
 
-  it("fails when the database does not answer", async () => {
+  it("fails with no internal details when the database does not answer", async () => {
     const app = appWith({
       ping: () => {
         throw new Error("database is closed");
@@ -43,17 +51,54 @@ describe("GET /health", () => {
     const response = await app.inject({ method: "GET", url: "/health" });
 
     expect(response.statusCode).toBe(500);
-    expect(response.json()).toMatchObject({ message: "database is closed" });
+    expect(response.json()).toEqual(INTERNAL_ERROR);
+    expect(response.body).not.toContain("closed");
+  });
+
+  it("answers HEAD like GET without a body", async () => {
+    const response = await appWith().inject({ method: "HEAD", url: "/health" });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toBe("");
+  });
+});
+
+describe("an unknown route or method", () => {
+  it.each([
+    ["GET", "/entries", undefined, ""],
+    ["POST", "/health", "application/json", '{"plate":"TEST009"}'],
+    ["POST", "/entry", "application/json", '{"plate":"TEST009"}'],
+    ["POST", "/entry", "text/plain", '{"plate":"TEST009"}'],
+    ["POST", "/entry", "application/json", '{"plate":'],
+    ["POST", "/entry", "application/json", `{"plate":"TEST009"}${" ".repeat(ONE_MIB)}`],
+  ] as const)("answers %s %s (%s) as not found", async (method, url, contentType, payload) => {
+    const inside: ParkedVehicle[] = [];
+
+    const response = await appWith({ inside }).inject({
+      method,
+      url,
+      payload,
+      headers: contentType === undefined ? {} : { "content-type": contentType },
+    });
+
+    expect(response.statusCode).toBe(404);
+    expect(response.json()).toEqual({ error: "not_found" });
+    expect(inside).toEqual([]);
   });
 });
 
 describe("POST /entries", () => {
-  const post = (app: ReturnType<typeof appWith>, payload: string, contentType?: string) =>
+  const post = (
+    app: ReturnType<typeof appWith>,
+    payload: string | Buffer | Readable,
+    contentType?: string,
+    headers: Record<string, string> = {},
+  ) =>
     app.inject({
       method: "POST",
       url: "/entries",
       payload,
-      headers: contentType === undefined ? {} : { "content-type": contentType },
+      headers: contentType === undefined ? headers : { ...headers, "content-type": contentType },
     });
 
   it("registers the entry and answers with the plate and the Madrid entry time", async () => {
@@ -114,6 +159,138 @@ describe("POST /entries", () => {
     expect(response.statusCode).toBe(400);
     expect(response.json()).toEqual({ error: "invalid_request" });
     expect(inside).toEqual([]);
+  });
+
+  it.each(["utf-8", "iso-8859-1", "windows-1252"])(
+    "reads the body as UTF-8 whatever the charset %s",
+    async (charset) => {
+      const response = await post(
+        appWith(),
+        '{"plate":"TEST004"}',
+        `application/json; charset=${charset}`,
+      );
+
+      expect(response.statusCode).toBe(201);
+      expect(response.json()).toMatchObject({ plate: "TEST004" });
+    },
+  );
+
+  it("reads a byte that is not UTF-8 inside the plate as a character that is not on a plate", async () => {
+    const body = Buffer.concat([
+      Buffer.from('{"plate":"'),
+      Buffer.from([0xd1]),
+      Buffer.from('AB123"}'),
+    ]);
+
+    const response = await post(appWith(), body, "application/json; charset=iso-8859-1");
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({ error: "invalid_plate" });
+  });
+
+  it("rejects a byte that is not UTF-8 outside the plate as a malformed request", async () => {
+    const body = Buffer.concat([Buffer.from('{"plate":"TEST004"}'), Buffer.from([0xd1])]);
+
+    const response = await post(appWith(), body, "application/json");
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({ error: "invalid_request" });
+  });
+
+  it("uses the last value of a repeated plate", async () => {
+    const inside: ParkedVehicle[] = [];
+
+    const response = await post(
+      appWith({ inside }),
+      '{"plate":"TEST005","plate":"TEST006"}',
+      "application/json",
+    );
+
+    expect(response.statusCode).toBe(201);
+    expect(inside.map(({ plate }) => plate)).toEqual(["TEST006"]);
+  });
+
+  it("checks the last value of a repeated plate", async () => {
+    const response = await post(
+      appWith(),
+      '{"plate":"TEST005","plate":"12#4"}',
+      "application/json",
+    );
+
+    expect(response.json()).toEqual({ error: "invalid_plate" });
+  });
+
+  it("rejects a request whose length does not match its body", async () => {
+    const response = await post(appWith(), '{"plate":"TEST003"}', "application/json", {
+      "content-length": "5",
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({ error: "invalid_request" });
+  });
+
+  it.each([
+    ["JSON", "application/json"],
+    ["text", "text/plain"],
+    ["no content type", undefined],
+    ["a malformed content type", "json"],
+  ])(
+    "rejects a body larger than 1 MiB as %s before checking its form",
+    async (_case, contentType) => {
+      const inside: ParkedVehicle[] = [];
+
+      const response = await post(
+        appWith({ inside }),
+        `{"plate":"TEST008"}${" ".repeat(ONE_MIB)}`,
+        contentType,
+      );
+
+      expect(response.statusCode).toBe(413);
+      expect(response.json()).toEqual({ error: "invalid_request" });
+      expect(inside).toEqual([]);
+    },
+  );
+
+  it("rejects a body larger than 1 MiB sent in chunks before checking its form", async () => {
+    const response = await post(
+      appWith(),
+      Readable.from([`{"plate":"TEST008"}`, " ".repeat(ONE_MIB)]),
+      "application/xml",
+    );
+
+    expect(response.statusCode).toBe(413);
+    expect(response.json()).toEqual({ error: "invalid_request" });
+  });
+
+  it("checks the form of a body of exactly 1 MiB", async () => {
+    const response = await post(appWith(), " ".repeat(ONE_MIB), "json");
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({ error: "invalid_request" });
+  });
+
+  it("accepts a body of exactly 1 MiB", async () => {
+    const plate = '{"plate":"TEST008"}';
+
+    const response = await post(
+      appWith(),
+      plate + " ".repeat(ONE_MIB - plate.length),
+      "application/json",
+    );
+
+    expect(response.statusCode).toBe(201);
+  });
+
+  it("fails with no internal details when the entry cannot be recorded", async () => {
+    const failure = Object.assign(new Error("attempt to write a readonly database"), {
+      code: "ERR_SQLITE_ERROR",
+    });
+
+    const response = await post(appWith({ failure }), '{"plate":"TEST007"}', "application/json");
+
+    expect(response.statusCode).toBe(500);
+    expect(response.json()).toEqual(INTERNAL_ERROR);
+    expect(response.body).not.toMatch(/readonly|SQLITE/);
   });
 
   it("rejects a malformed request before checking the plate", async () => {
