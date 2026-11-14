@@ -12,11 +12,12 @@ example, with `charset=iso-8859-1`, the body `{"plate":"<byte 0xD1>AB123"}`, whi
 ISO-8859-1, is `400 invalid_plate`, the same answer as `ÑAB123` sent in UTF-8.
 
 One UTF-8 byte order mark (the bytes `EF BB BF`) as the very first bytes of the body is ignored, and
-the rest of the body is read as if it were not there: `<BOM>{"plate":"TEST003"}` registers `TEST003`.
-Anywhere else the byte order mark is the character U+FEFF and is handled like any other character:
-inside the value of `plate` it makes the plate `invalid_plate`; anywhere else, for example after a
-first byte order mark, after whitespace or after the JSON value, it makes the request
-`invalid_request`. A body that holds only a byte order mark is empty, so it is `invalid_request`.
+the rest of the body is read as if it were not there: `<BOM>{"plate":"TEST003"}` registers
+`TEST003`. Anywhere else the byte order mark is the character U+FEFF and is handled like any other
+character: inside the value of `plate` it makes the plate `invalid_plate`; anywhere else, for
+example after a first byte order mark, after whitespace or after the JSON value, it makes the
+request `invalid_request`. A body that holds only a byte order mark is empty, so it is
+`invalid_request`.
 
 | Case                                          | Status | Body                                                             |
 | --------------------------------------------- | ------ | ---------------------------------------------------------------- |
@@ -98,21 +99,21 @@ converting them, is what makes "the booth cannot send an entry time" hold.
 Every error response of the API, within the scope set below, has the same `{"error": "<code>"}`
 shape, so the booth never has to parse a second format. A framework rejection of the request is a
 fault of the booth's software like the listed ones, so it shares their code; a body that is too
-large keeps the standard 413 status, which tells it apart without a new code. 1 MiB is the framework's default limit and is far above any
-valid request. Internal details in a 500 would expose the server's database and files to the client
-and are of no use to the booth, which can only retry or call for help. Reading the body always as
-UTF-8 follows RFC 8259, which requires UTF-8 for JSON exchanged between systems; a plate is ASCII,
-so the charset makes no difference to a valid plate. Reading bytes that are not UTF-8 as U+FFFD,
-instead of rejecting the whole body, keeps one rule for every plate the booth cannot send: a
-character outside ASCII, however it was encoded, is a plate mistake the staff can correct. The last
-value of a repeated key is how standard JSON parsers read it; rejecting it would need a parser of its
-own for a case the booth does not send. An unknown route or method is not a fault in a request to
-this API but a request to
-something the API does not have, so it keeps the standard 404 of HTTP and gets a code of its own in
-the same shape; 404 for a wrong method on a known path, rather than 405, spares the booth a case
-that calls for the same action, fixing its software. The route is checked before the body because
-the rules on the body belong to `POST /entries`: a request to something the API does not have has
-no body rules to break, and the size and form of its body never decide its answer.
+large keeps the standard 413 status, which tells it apart without a new code. 1 MiB is the
+framework's default limit and is far above any valid request. Internal details in a 500 would expose
+the server's database and files to the client and are of no use to the booth, which can only retry
+or call for help. Reading the body always as UTF-8 follows RFC 8259, which requires UTF-8 for JSON
+exchanged between systems; a plate is ASCII, so the charset makes no difference to a valid plate.
+Reading bytes that are not UTF-8 as U+FFFD, instead of rejecting the whole body, keeps one rule for
+every plate the booth cannot send: a character outside ASCII, however it was encoded, is a plate
+mistake the staff can correct. The last value of a repeated key is how standard JSON parsers read
+it; rejecting it would need a parser of its own for a case the booth does not send. An unknown route
+or method is not a fault in a request to this API but a request to something the API does not have,
+so it keeps the standard 404 of HTTP and gets a code of its own in the same shape; 404 for a wrong
+method on a known path, rather than 405, spares the booth a case that calls for the same action,
+fixing its software. The route is checked before the body because the rules on the body belong to
+`POST /entries`: a request to something the API does not have has no body rules to break, and the
+size and form of its body never decide its answer.
 
 ## Scope of the error rules
 
